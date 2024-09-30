@@ -75,7 +75,7 @@ func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 		operation := parts[0]
 		var args string
 		if len(parts) > 1 {
-			args = parts[1]
+			args = strings.TrimRight(parts[1], "/")
 		}
 
 		fmt.Println("operation", operation)
