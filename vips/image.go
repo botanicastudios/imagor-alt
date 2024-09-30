@@ -728,3 +728,13 @@ func (r *Image) setImage(image *C.VipsImage) {
 	r.image = image
 	r.pageHeight = 0
 }
+
+// AutoLevels applies auto levels to the image
+func (r *Image) AutoLevels() error {
+	out, err := vipsAutoLevels(r.image)
+	if err != nil {
+		return err
+	}
+	r.setImage(out)
+	return nil
+}

@@ -702,3 +702,18 @@ func hexToByte(b byte) byte {
 func isAnimated(img *Image) bool {
 	return img.Height() > img.PageHeight()
 }
+
+func enhance(_ context.Context, img *Image, _ imagor.LoadFunc, args ...string) (err error) {
+	if len(args) == 0 {
+		return
+	}
+	strength, _ := strconv.ParseFloat(args[0], 64)
+	strength = strength / 100 // Convert percentage to decimal
+
+	// Apply auto levels to the image
+	if err = img.AutoLevels(); err != nil {
+		return err
+	}
+
+	return nil
+}

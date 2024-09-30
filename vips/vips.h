@@ -92,3 +92,16 @@ int get_meta_loader(const VipsImage *in, const char **out);
 void set_image_delay(VipsImage *in, const int *array, int n);
 const char * get_meta_string(const VipsImage *image, const char *name);
 int remove_exif(VipsImage *in, VipsImage **out);
+
+int vips_auto_levels(VipsImage *in, VipsImage **out);
+
+// Add these new declarations
+int vips_hist_find(VipsImage *in, VipsImage **out, ...);
+int vips_hist_find_ndim(VipsImage *in, VipsImage **out, ...);
+int vips_linear1(VipsImage *in, VipsImage **out, double a, double b, ...);
+
+// Add these new declarations
+int vips_hist_cum(VipsImage *in, VipsImage **out, ...);
+int vips_min(VipsImage *in, double *out, ...);
+int vips_max(VipsImage *in, double *out, ...);
+int vips_getpoint(VipsImage *in, double **vector, int *n, int x, int y, ...);
