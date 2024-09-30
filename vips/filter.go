@@ -710,8 +710,36 @@ func enhance(_ context.Context, img *Image, _ imagor.LoadFunc, args ...string) (
 	strength, _ := strconv.ParseFloat(args[0], 64)
 	strength = strength / 100 // Convert percentage to decimal
 
-	// Apply auto levels to the image
-	if err = img.AutoLevels(); err != nil {
+	if strength <= 0 {
+		return nil
+	}
+
+	// Create a copy of the original image for auto levels
+	autoLevelImage, err := img.Copy()
+	if err != nil {
+		return err
+	}
+	defer autoLevelImage.Close()
+
+	// Apply auto levels to the copied image
+	if err = autoLevelImage.AutoLevels(); err != nil {
+		return err
+	}
+
+	if strength < 1 {
+		// Add alpha channel to the auto-leveled image if it doesn't have one
+		if err = autoLevelImage.AddAlpha(); err != nil {
+			return err
+		}
+
+		// Set the alpha channel of the auto-leveled image to the strength value
+		if err = autoLevelImage.Linear([]float64{1, 1, 1, strength}, []float64{0, 0, 0, 0}); err != nil {
+			return err
+		}
+	}
+
+	// Composite the auto-leveled image over the original
+	if err = img.Composite(autoLevelImage, BlendModeOver, 0, 0); err != nil {
 		return err
 	}
 
