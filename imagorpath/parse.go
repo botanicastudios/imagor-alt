@@ -75,7 +75,7 @@ func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 		operation := parts[0]
 		var args string
 		if len(parts) > 1 {
-			args = parts[1]
+			args = strings.TrimRight(parts[1], "/")
 		}
 
 		fmt.Println("operation", operation)
@@ -119,6 +119,7 @@ func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 			p.Filters = append(p.Filters, Filter{Name: "rotate", Args: strconv.Itoa(angle)})
 		case "enhance":
 			strength, _ := strconv.Atoi(args)
+			fmt.Println("parse strength", strength)
 			p.Filters = append(p.Filters, Filter{Name: "enhance", Args: strconv.Itoa(strength)})
 		case "resize":
 			dimensions := strings.Split(args, "x")

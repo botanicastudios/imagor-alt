@@ -605,17 +605,24 @@ int remove_exif(VipsImage *in, VipsImage **out)
 int vips_auto_levels(VipsImage *in, VipsImage **out)
 {
   VipsImage *base = vips_image_new();
-  VipsImage **t = (VipsImage **)vips_object_local_array(VIPS_OBJECT(base), 6);
+  VipsImage **t = (VipsImage **)vips_object_local_array(VIPS_OBJECT(base), 7);
+
+  // Force the image to be fully decoded into memory
+  if (!(t[0] = vips_image_copy_memory(in)))
+  {
+    g_object_unref(base);
+    return 1;
+  }
 
   // Step 1: Calculate histogram
-  if (vips_hist_find(in, &t[0], NULL))
+  if (vips_hist_find(t[0], &t[1], NULL))
   {
     g_object_unref(base);
     return 1;
   }
 
   // Step 2: Calculate cumulative histogram
-  if (vips_hist_cum(t[0], &t[1], NULL))
+  if (vips_hist_cum(t[1], &t[2], NULL))
   {
     g_object_unref(base);
     return 1;
@@ -623,14 +630,14 @@ int vips_auto_levels(VipsImage *in, VipsImage **out)
 
   // Step 3: Find black and white points using cumulative histogram
   double min, max;
-  if (vips_min(t[1], &min, NULL) ||
-      vips_max(t[1], &max, NULL))
+  if (vips_min(t[2], &min, NULL) ||
+      vips_max(t[2], &max, NULL))
   {
     g_object_unref(base);
     return 1;
   }
 
-  int bins = t[1]->Xsize;
+  int bins = t[2]->Xsize;
   double black_threshold = max * 0.01; // 1% of pixels
   double white_threshold = max * 0.99; // 99% of pixels
 
@@ -641,7 +648,7 @@ int vips_auto_levels(VipsImage *in, VipsImage **out)
   int n;
   for (int i = 0; i < bins; i++)
   {
-    if (vips_getpoint(t[1], &row, &n, i, 0, NULL))
+    if (vips_getpoint(t[2], &row, &n, i, 0, NULL))
     {
       g_object_unref(base);
       return 1;
@@ -661,15 +668,15 @@ int vips_auto_levels(VipsImage *in, VipsImage **out)
   double scale = 255.0 / (white_point - black_point);
   double offset = -black_point * scale;
 
-  if (vips_linear1(in, &t[2], scale, offset, NULL) ||
-      vips_cast(t[2], &t[3], VIPS_FORMAT_UCHAR, NULL))
+  if (vips_linear1(t[0], &t[3], scale, offset, NULL) ||
+      vips_cast(t[3], &t[4], VIPS_FORMAT_UCHAR, NULL))
   {
     g_object_unref(base);
     return 1;
   }
 
   // Step 5: Copy the result
-  if (vips_copy(t[3], out, NULL))
+  if (vips_copy(t[4], out, NULL))
   {
     g_object_unref(base);
     return 1;
