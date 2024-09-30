@@ -119,7 +119,7 @@ func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 			p.Filters = append(p.Filters, Filter{Name: "rotate", Args: strconv.Itoa(angle)})
 		case "enhance":
 			strength, _ := strconv.Atoi(args)
-			p.Filters = append(p.Filters, Filter{Name: "enhance", Args: strconv.Itoa(strength)})
+			p.Filters = append(p.Filters, Filter{Name: "auto_levels", Args: strconv.Itoa(strength)})
 		case "resize":
 			dimensions := strings.Split(args, "x")
 			fmt.Println("dimensions", dimensions)

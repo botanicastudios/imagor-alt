@@ -76,7 +76,7 @@ func NewProcessor(options ...Option) *Processor {
 		"set_frames":       setFrames,
 		"padding":          v.padding,
 		"proportion":       proportion,
-		"enhance":          enhance,
+		"auto_levels":      autoLevels,
 	}
 	for _, option := range options {
 		option(v)

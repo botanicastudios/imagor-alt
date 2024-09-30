@@ -703,7 +703,7 @@ func isAnimated(img *Image) bool {
 	return img.Height() > img.PageHeight()
 }
 
-func enhance(_ context.Context, img *Image, _ imagor.LoadFunc, args ...string) (err error) {
+func autoLevels(_ context.Context, img *Image, _ imagor.LoadFunc, args ...string) (err error) {
 	if len(args) == 0 {
 		return
 	}

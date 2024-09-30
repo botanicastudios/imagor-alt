@@ -126,6 +126,9 @@ func (v *Processor) Process(
 		case "strip_metadata":
 			stripMetadata = true
 			break
+		case "auto_levels":
+			thumbnailNotSupported = true
+			break
 		}
 	}
 

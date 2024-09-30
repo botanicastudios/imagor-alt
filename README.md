@@ -42,7 +42,7 @@ http://localhost:8000/unsafe/30x40:100x150/filters:fill(cyan)/raw.githubusercont
 http://localhost:8000/unsafe/fit-in/200x150/filters:fill(yellow):watermark(raw.githubusercontent.com/cshum/imagor/master/testdata/gopher-front.png,repeat,bottom,0,40,40)/raw.githubusercontent.com/cshum/imagor/master/testdata/dancing-banana.gif
 ```
 
-<img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo1.jpg" height="100" /> <img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo2.jpg" height="100" /> <img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo4.jpg" height="100" /> <img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo3.gif" height="100" /> <img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo5.gif" height="100" />  
+<img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo1.jpg" height="100" /> <img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo2.jpg" height="100" /> <img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo4.jpg" height="100" /> <img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo3.gif" height="100" /> <img src="https://raw.githubusercontent.com/cshum/imagor/master/testdata/demo5.gif" height="100" />
 
 ### Image Endpoint
 
@@ -78,6 +78,8 @@ Filters `/filters:NAME(ARGS):NAME(ARGS):.../` is a pipeline of image operations 
 
 imagor supports the following filters:
 
+- `auto_levels(strength)` re-maps the image luminance so the darkest pixel becomes black and the lightest becomes white.
+  - `strength` 0 to 100, the percentage that the auto levels filter will be applied
 - `background_color(color)` sets the background color of a transparent image
   - `color` the color name or hexadecimal rgb expression without the “#” character
 - `blur(sigma)` applies gaussian blur to the image
@@ -160,7 +162,6 @@ These filters do not manipulate images but provide useful utilities to the imago
 - `preview()` skips the result storage even if result storage is enabled. Useful for conditional caching
 - `raw()` response with a raw unprocessed and unchecked source image. Image still loads from loader and storage but skips the result storage
 
-
 ### Loader, Storage and Result Storage
 
 imagor `Loader`, `Storage` and `Result Storage` are the building blocks for loading and saving images from various sources:
@@ -195,7 +196,7 @@ services:
       FILE_RESULT_STORAGE_BASE_DIR: /mnt/data/result # enable file result storage by specifying base dir
       FILE_RESULT_STORAGE_MKDIR_PERMISSION: 0755 # optional
       FILE_RESULT_STORAGE_WRITE_PERMISSION: 0666 # optional
-      
+
     ports:
       - "8000:8000"
 ```
@@ -235,8 +236,8 @@ services:
 Configure custom S3 endpoint for S3 compatible such as MinIO, DigitalOcean Space:
 
 ```yaml
-      S3_ENDPOINT: http://minio:9000
-      S3_FORCE_PATH_STYLE: 1
+S3_ENDPOINT: http://minio:9000
+S3_FORCE_PATH_STYLE: 1
 ```
 
 By default, S3 prepends bucket name as subdomain to the request URL:
@@ -308,21 +309,21 @@ services:
 
 `IMAGOR_STORAGE_PATH_STYLE=digest`
 
-* `foobar.jpg` becomes `e6/86/1a810ff186b4f747ef85f7c53946f0e6d8cb`
+- `foobar.jpg` becomes `e6/86/1a810ff186b4f747ef85f7c53946f0e6d8cb`
 
 `IMAGOR_RESULT_STORAGE_PATH_STYLE=digest`
 
-* `fit-in/16x17/foobar.jpg` becomes `61/4c/9ba1725e8cdd8263a4ad437c56b35f33deba`
+- `fit-in/16x17/foobar.jpg` becomes `61/4c/9ba1725e8cdd8263a4ad437c56b35f33deba`
 
 `IMAGOR_RESULT_STORAGE_PATH_STYLE=suffix`
 
-* `166x169/top/foobar.jpg` becomes `foobar.45d8ebb31bd4ed80c26e.jpg`
-* `17x19/smart/example.com/foobar` becomes `example.com/foobar.ddd349e092cda6d9c729`
+- `166x169/top/foobar.jpg` becomes `foobar.45d8ebb31bd4ed80c26e.jpg`
+- `17x19/smart/example.com/foobar` becomes `example.com/foobar.ddd349e092cda6d9c729`
 
 `IMAGOR_RESULT_STORAGE_PATH_STYLE=size`
 
-* `166x169/top/foobar.jpg` becomes `foobar.45d8ebb31bd4ed80c26e_166x169.jpg`
-* `17x19/smart/example.com/foobar` becomes `example.com/foobar.ddd349e092cda6d9c729_17x19`
+- `166x169/top/foobar.jpg` becomes `foobar.45d8ebb31bd4ed80c26e_166x169.jpg`
+- `17x19/smart/example.com/foobar` becomes `example.com/foobar.ddd349e092cda6d9c729_17x19`
 
 ### Security
 
@@ -334,17 +335,24 @@ The URL signature hash is based on SHA digest, created by taking the URL path (e
 An example in Node.js:
 
 ```javascript
-const crypto = require('crypto');
+const crypto = require("crypto");
 
 function sign(path, secret) {
-  const hash = crypto.createHmac('sha1', secret)
-          .update(path)
-          .digest('base64')
-          .replace(/\+/g, '-').replace(/\//g, '_')
-  return hash + '/' + path
+  const hash = crypto
+    .createHmac("sha1", secret)
+    .update(path)
+    .digest("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+  return hash + "/" + path;
 }
 
-console.log(sign('500x500/top/raw.githubusercontent.com/cshum/imagor/master/testdata/gopher.png', 'mysecret'))
+console.log(
+  sign(
+    "500x500/top/raw.githubusercontent.com/cshum/imagor/master/testdata/gopher.png",
+    "mysecret"
+  )
+);
 // cST4Ko5_FqwT3BDn-Wf4gO3RFSk=/500x500/top/raw.githubusercontent.com/cshum/imagor/master/testdata/gopher.png
 ```
 
@@ -360,18 +368,25 @@ IMAGOR_SIGNER_TRUNCATE=40
 The Node.js example then becomes:
 
 ```javascript
-const crypto = require('crypto');
+const crypto = require("crypto");
 
 function sign(path, secret) {
-  const hash = crypto.createHmac('sha256', secret)
-          .update(path)
-          .digest('base64')
-          .slice(0, 40)
-          .replace(/\+/g, '-').replace(/\//g, '_')
-  return hash + '/' + path
+  const hash = crypto
+    .createHmac("sha256", secret)
+    .update(path)
+    .digest("base64")
+    .slice(0, 40)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_");
+  return hash + "/" + path;
 }
 
-console.log(sign('500x500/top/raw.githubusercontent.com/cshum/imagor/master/testdata/gopher.png', 'mysecret'))
+console.log(
+  sign(
+    "500x500/top/raw.githubusercontent.com/cshum/imagor/master/testdata/gopher.png",
+    "mysecret"
+  )
+);
 // IGEn3TxngivD0jy4uuiZim2bdUCvhcnVi1Nm0xGy/500x500/top/raw.githubusercontent.com/cshum/imagor/master/testdata/gopher.png
 ```
 
@@ -404,20 +419,22 @@ Whitelist specific hosts to restrict loading images only from the allowed source
 Alternatively, it is possible to set a base URL for loading images strictly from one HTTP source. This also trims down the base URL from image endpoint:
 
 Example URL:
+
 ```
 http://localhost:8000/unsafe/fit-in/200x150/filters:fill(yellow):watermark(raw.githubusercontent.com/cshum/imagor/master/testdata/gopher-front.png,repeat,bottom,0,40,40)/raw.githubusercontent.com/cshum/imagor/master/testdata/dancing-banana.gif
 ```
 
 With HTTP Loader Base URL config:
+
 ```
 HTTP_LOADER_BASE_URL=https://raw.githubusercontent.com/cshum/imagor/master
 ```
 
 The example URL then becomes:
+
 ```
 http://localhost:8000/unsafe/fit-in/200x150/filters:fill(yellow):watermark(testdata/gopher-front.png,repeat,bottom,0,40,40)/testdata/dancing-banana.gif
 ```
-
 
 ### Metadata and Exif
 
@@ -448,13 +465,14 @@ http://localhost:8000/unsafe/meta/fit-in/50x50/raw.githubusercontent.com/cshum/i
     "ISOSpeedRatings": 100,
     "Make": "Canon",
     "MeteringMode": 5,
-    "Model": "Canon EOS 40D",
+    "Model": "Canon EOS 40D"
     //...
   }
 }
 ```
 
 Prepending `/params` to the existing endpoint returns the endpoint attributes in JSON form, useful for previewing the endpoint parameters. Example:
+
 ```bash
 curl 'http://localhost:8000/params/g5bMqZvxaQK65qFPaP1qlJOTuLM=/fit-in/500x400/0x20/filters:fill(white)/raw.githubusercontent.com/cshum/imagor/master/testdata/gopher.png'
 ```
@@ -473,6 +491,7 @@ It facilitates high-level image processing in a modular architecture made up of 
 - [gcloudstorage](https://pkg.go.dev/github.com/cshum/imagor/storage/gcloudstorage) - Google Cloud Storage, an `imagor.Storage` implementation
 
 Install [libvips](https://www.libvips.org/) and enable CGO:
+
 - `brew install vips` for Mac
 - `CGO_CFLAGS_ALLOW=-Xpreprocessor` being set to compile Go
 
@@ -631,7 +650,7 @@ Usage of imagor:
         Specify address and port to enable Prometheus metrics, e.g. :5000, prom:7000
   -prometheus-path string
         Prometheus metrics path (default "/")
-        
+
   -http-loader-allowed-sources string
         HTTP Loader allowed hosts whitelist to load images from if set. Accept csv wth glob pattern e.g. *.google.com,*.github.com.
   -http-loader-base-url string
@@ -655,7 +674,7 @@ Usage of imagor:
   -http-loader-default-scheme string
         HTTP Loader default scheme if not specified by image path. Set "nil" to disable default scheme. (default "https")
   -http-loader-accept string
-        HTTP Loader set request Accept header and validate response Content-Type header (default "*/*") 
+        HTTP Loader set request Accept header and validate response Content-Type header (default "*/*")
   -http-loader-block-link-local-networks
         HTTP Loader rejects connections to link local network IP addresses.
   -http-loader-block-loopback-networks
@@ -734,7 +753,7 @@ Usage of imagor:
         Upload ACL for S3 Storage (default "public-read")
   -s3-storage-expiration duration
         S3 Storage expiration duration e.g. 24h. Default no expiration
-        
+
   -aws-loader-access-key-id string
         AWS Access Key ID for S3 Loader to override global config
   -aws-loader-region string
@@ -794,7 +813,7 @@ Usage of imagor:
         Google Cloud Storage expiration duration e.g. 24h. Default no expiration
   -gcloud-storage-path-prefix string
         Base path prefix for Google Cloud Storage
-        
+
   -vips-max-animation-frames int
         VIPS maximum number of animation frames to be loaded. Set 1 to disable animation, -1 for unlimited
   -vips-disable-blur
