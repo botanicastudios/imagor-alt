@@ -730,8 +730,8 @@ func (r *Image) setImage(image *C.VipsImage) {
 }
 
 // AutoLevels applies auto levels to the image
-func (r *Image) AutoLevels() error {
-	out, err := vipsAutoLevels(r.image)
+func (r *Image) AutoLevels(strength float32) error {
+	out, err := vipsAutoLevels(r.image, strength)
 	if err != nil {
 		return err
 	}

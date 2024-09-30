@@ -417,11 +417,10 @@ func vipsGetMetaString(image *C.VipsImage, name string) string {
 	return C.GoString(C.get_meta_string(image, cachedCString(name)))
 }
 
-// https://libvips.github.io/libvips/API/current/libvips-histogram.html#vips-hist-equal
-func vipsAutoLevels(in *C.VipsImage) (*C.VipsImage, error) {
+func vipsAutoLevels(in *C.VipsImage, strength float32) (*C.VipsImage, error) {
 	var out *C.VipsImage
 
-	if err := C.vips_auto_levels(in, &out); err != 0 {
+	if err := C.vips_auto_levels(in, &out, C.float(strength)); err != 0 {
 		return nil, handleImageError(out)
 	}
 

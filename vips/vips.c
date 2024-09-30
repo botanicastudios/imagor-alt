@@ -602,8 +602,11 @@ int remove_exif(VipsImage *in, VipsImage **out)
   return 0;
 }
 
-int vips_auto_levels(VipsImage *in, VipsImage **out)
+int vips_auto_levels(VipsImage *in, VipsImage **out, float strength)
 {
+  // Clamp strength to 0-100 range
+  strength = strength < 0 ? 0 : (strength > 100 ? 100 : strength);
+
   VipsImage *base = vips_image_new();
   VipsImage **t = (VipsImage **)vips_object_local_array(VIPS_OBJECT(base), 6);
 
@@ -657,9 +660,21 @@ int vips_auto_levels(VipsImage *in, VipsImage **out)
     }
   }
 
-  // Step 4: Apply linear stretch
-  double scale = 255.0 / (white_point - black_point);
-  double offset = -black_point * scale;
+  // Step 4: Apply linear stretch based on strength
+  double scale, offset;
+  if (strength == 0)
+  {
+    scale = 1.0;
+    offset = 0.0;
+  }
+  else
+  {
+    double full_scale = 255.0 / (white_point - black_point);
+    double full_offset = -black_point * full_scale;
+
+    scale = 1.0 + (full_scale - 1.0) * (strength / 100.0);
+    offset = full_offset * (strength / 100.0);
+  }
 
   if (vips_linear1(in, &t[2], scale, offset, NULL) ||
       vips_cast(t[2], &t[3], VIPS_FORMAT_UCHAR, NULL))
