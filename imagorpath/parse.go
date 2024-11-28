@@ -55,19 +55,25 @@ func Parse(path string) Params {
 func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 	// Split path into components
 	components := strings.Split(path, "/-/")
-	// TODO: replace base URL
-	p.Image = "https://ucarecdn.com/" + uuid + "/"
+	// Determine the base URL based on the UUID version
+	// UUIDv4 is created by Uploadcare, UUIDv8 is created by UploadKit
+	baseURL := "https://ucarecdn.com/"
+	if uuid[14] == '8' {
+		// UUID v8
+		baseURL = "https://s3.amazonaws.com/storagei-uploadkit/stage/"
+	}
+	p.Image = baseURL + uuid
+	if uuid[14] != '8' {
+		p.Image = p.Image + "/"
+	}
 	p.Unsafe = true
 	p.Params = isParams
-
-	fmt.Println("uuid", p.Image)
-	fmt.Println("path", path)
 
 	if len(components) < 2 {
 		return p
 	}
 
-	fmt.Println("components", components)
+	// fmt.Println("components", components)
 
 	// Process each transformation
 	for _, component := range components[1:] {
@@ -78,9 +84,9 @@ func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 			args = strings.TrimRight(parts[1], "/")
 		}
 
-		fmt.Println("operation", operation)
-		fmt.Println("args", args)
-		fmt.Println("")
+		// fmt.Println("operation", operation)
+		// fmt.Println("args", args)
+		// fmt.Println("")
 
 		switch operation {
 		case "preview":
@@ -122,7 +128,7 @@ func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 			p.Filters = append(p.Filters, Filter{Name: "auto_levels", Args: strconv.Itoa(strength)})
 		case "resize":
 			dimensions := strings.Split(args, "x")
-			fmt.Println("dimensions", dimensions)
+			//fmt.Println("dimensions", dimensions)
 			if len(dimensions) > 0 {
 				if dimensions[0] != "" {
 					p.Width, _ = strconv.Atoi(dimensions[0])
@@ -143,7 +149,7 @@ func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 				size := strings.Split(overlayArgs[1], "x")
 				position := overlayArgs[2]
 
-				fmt.Println("size", size)
+				//fmt.Println("size", size)
 
 				var width, height string
 				if len(size) == 2 {
@@ -151,8 +157,8 @@ func ApplyUC(p Params, uuid string, isParams bool, path string) Params {
 					height = strings.TrimSuffix(size[1], "p")
 				}
 
-				fmt.Println("width", width)
-				fmt.Println("height", height)
+				// fmt.Println("width", width)
+				// fmt.Println("height", height)
 
 				overlayUrl := "https://ucarecdn.com/" + overlayUUID + "/"
 				watermarkFilter := fmt.Sprintf("%s,%s,%s,0,%s,%s,force", overlayUrl, position, position, width, height)

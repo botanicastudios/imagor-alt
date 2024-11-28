@@ -608,7 +608,7 @@ int vips_auto_levels(VipsImage *in, VipsImage **out, float strength)
   strength = strength < 0 ? 0 : (strength > 100 ? 100 : strength);
 
   VipsImage *base = vips_image_new();
-  VipsImage **t = (VipsImage **)vips_object_local_array(VIPS_OBJECT(base), 6);
+  VipsImage **t = (VipsImage **)vips_object_local_array(VIPS_OBJECT(base), 4);
 
   // Step 1: Calculate histogram
   if (vips_hist_find(in, &t[0], NULL))
@@ -617,48 +617,58 @@ int vips_auto_levels(VipsImage *in, VipsImage **out, float strength)
     return 1;
   }
 
+  // Access histogram data using vips_image_write_to_memory
+  int bins = t[0]->Xsize;
+  double *hist_data = NULL;
+  size_t hist_size = 0;
+
+  hist_data = (double *)vips_image_write_to_memory(t[0], &hist_size);
+  if (hist_data == NULL)
+  {
+    g_object_unref(base);
+    return 1;
+  }
+
   // Step 2: Calculate cumulative histogram
-  if (vips_hist_cum(t[0], &t[1], NULL))
+  double *cum_hist = g_new(double, bins);
+  cum_hist[0] = hist_data[0];
+  for (int i = 1; i < bins; i++)
   {
-    g_object_unref(base);
-    return 1;
+    cum_hist[i] = cum_hist[i - 1] + hist_data[i];
   }
 
-  // Step 3: Find black and white points using cumulative histogram
-  double min, max;
-  if (vips_min(t[1], &min, NULL) ||
-      vips_max(t[1], &max, NULL))
-  {
-    g_object_unref(base);
-    return 1;
-  }
+  // Total number of pixels
+  double total_pixels = cum_hist[bins - 1];
 
-  int bins = t[1]->Xsize;
-  double black_threshold = max * 0.01; // 1% of pixels
-  double white_threshold = max * 0.99; // 99% of pixels
+  // Step 3: Find black and white points
+  double black_threshold = total_pixels * 0.01; // 1% of pixels
+  double white_threshold = total_pixels * 0.99; // 99% of pixels
 
   int black_point = 0;
   int white_point = bins - 1;
 
-  double *row;
-  int n;
+  // Find black point
   for (int i = 0; i < bins; i++)
   {
-    if (vips_getpoint(t[1], &row, &n, i, 0, NULL))
-    {
-      g_object_unref(base);
-      return 1;
-    }
-    if (row[0] > black_threshold && black_point == 0)
+    if (cum_hist[i] >= black_threshold)
     {
       black_point = i;
+      break;
     }
-    if (row[0] > white_threshold)
+  }
+
+  // Find white point
+  for (int i = bins - 1; i >= 0; i--)
+  {
+    if (cum_hist[i] <= white_threshold)
     {
       white_point = i;
       break;
     }
   }
+
+  g_free(cum_hist);
+  g_free(hist_data);
 
   // Step 4: Apply linear stretch based on strength
   double scale, offset;
@@ -676,15 +686,15 @@ int vips_auto_levels(VipsImage *in, VipsImage **out, float strength)
     offset = full_offset * (strength / 100.0);
   }
 
-  if (vips_linear1(in, &t[2], scale, offset, NULL) ||
-      vips_cast(t[2], &t[3], VIPS_FORMAT_UCHAR, NULL))
+  if (vips_linear1(in, &t[1], scale, offset, NULL) ||
+      vips_cast(t[1], &t[2], VIPS_FORMAT_UCHAR, NULL))
   {
     g_object_unref(base);
     return 1;
   }
 
   // Step 5: Copy the result
-  if (vips_copy(t[3], out, NULL))
+  if (vips_copy(t[2], out, NULL))
   {
     g_object_unref(base);
     return 1;
