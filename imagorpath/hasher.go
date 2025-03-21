@@ -17,6 +17,11 @@ type ResultStorageHasher interface {
 	HashResult(p Params) string
 }
 
+// PrefilterStorageHasher define key for prefilter storage
+type PrefilterStorageHasher interface {
+	Hash(params Params, image string, prefilters []PrefilterDefinition) string
+}
+
 // StorageHasherFunc StorageHasher handler func
 type StorageHasherFunc func(image string) string
 
@@ -31,6 +36,20 @@ type ResultStorageHasherFunc func(p Params) string
 // HashResult implements ResultStorageHasher interface
 func (h ResultStorageHasherFunc) HashResult(p Params) string {
 	return h(p)
+}
+
+// PrefilterDefinition defines a single prefilter with its name and arguments
+type PrefilterDefinition struct {
+	Name string
+	Args string
+}
+
+// PrefilterStorageHasherFunc PrefilterStorageHasher handler func
+type PrefilterStorageHasherFunc func(params Params, image string, prefilters []PrefilterDefinition) string
+
+// Hash implements PrefilterStorageHasher interface
+func (h PrefilterStorageHasherFunc) Hash(params Params, image string, prefilters []PrefilterDefinition) string {
+	return h(params, image, prefilters)
 }
 
 func hexDigestPath(path string) string {
@@ -101,4 +120,32 @@ var SizeSuffixResultStorageHasher = ResultStorageHasherFunc(func(p Params) strin
 		return p.Image[:dotIdx] + hash + ext // /abc/def.{digest}_{width}x{height}.jpg
 	}
 	return p.Image + hash // /abc/def.{digest}_{width}x{height}
+})
+
+// DigestPrefilterStorageHasher PrefilterStorageHasher using SHA digest
+var DigestPrefilterStorageHasher = PrefilterStorageHasherFunc(func(params Params, image string, prefilters []PrefilterDefinition) string {
+	// Build a string representation of the prefilters
+	prefilterStr := ""
+	for _, pf := range prefilters {
+		prefilterStr += pf.Name + ":" + pf.Args + ";"
+	}
+	return hexDigestPath(image + ":" + prefilterStr)
+})
+
+// SuffixPrefilterStorageHasher PrefilterStorageHasher using storage path with digest suffix
+var SuffixPrefilterStorageHasher = PrefilterStorageHasherFunc(func(params Params, image string, prefilters []PrefilterDefinition) string {
+	// Build a string representation of the prefilters
+	prefilterStr := ""
+	for _, pf := range prefilters {
+		prefilterStr += pf.Name + ":" + pf.Args + ";"
+	}
+	var digest = sha1.Sum([]byte(image + ":" + prefilterStr))
+	var hash = ".prefilter." + hex.EncodeToString(digest[:])[:20]
+	var dotIdx = strings.LastIndex(image, ".")
+	var slashIdx = strings.LastIndex(image, "/")
+	if dotIdx > -1 && slashIdx < dotIdx {
+		ext := image[dotIdx:]
+		return image[:dotIdx] + hash + ext // /abc/def.prefilter.{digest}.jpg
+	}
+	return image + hash // /abc/def.prefilter.{digest}
 })

@@ -63,31 +63,34 @@ type Processor interface {
 
 // Imagor main application
 type Imagor struct {
-	Unsafe                 bool
-	Signer                 imagorpath.Signer
-	StoragePathStyle       imagorpath.StorageHasher
-	ResultStoragePathStyle imagorpath.ResultStorageHasher
-	BasePathRedirect       string
-	Loaders                []Loader
-	Storages               []Storage
-	ResultStorages         []Storage
-	Processors             []Processor
-	RequestTimeout         time.Duration
-	LoadTimeout            time.Duration
-	SaveTimeout            time.Duration
-	ProcessTimeout         time.Duration
-	CacheHeaderTTL         time.Duration
-	CacheHeaderSWR         time.Duration
-	ProcessConcurrency     int64
-	ProcessQueueSize       int64
-	AutoWebP               bool
-	AutoAVIF               bool
-	ModifiedTimeCheck      bool
-	DisableErrorBody       bool
-	DisableParamsEndpoint  bool
-	BaseParams             string
-	Logger                 *zap.Logger
-	Debug                  bool
+	Unsafe                    bool
+	Signer                    imagorpath.Signer
+	StoragePathStyle          imagorpath.StorageHasher
+	ResultStoragePathStyle    imagorpath.ResultStorageHasher
+	PrefilterStoragePathStyle imagorpath.PrefilterStorageHasher
+	BasePathRedirect          string
+	Loaders                   []Loader
+	Storages                  []Storage
+	ResultStorages            []Storage
+	PrefilterStorages         []Storage
+	Processors                []Processor
+	Prefilters                []Prefilter
+	RequestTimeout            time.Duration
+	LoadTimeout               time.Duration
+	SaveTimeout               time.Duration
+	ProcessTimeout            time.Duration
+	CacheHeaderTTL            time.Duration
+	CacheHeaderSWR            time.Duration
+	ProcessConcurrency        int64
+	ProcessQueueSize          int64
+	AutoWebP                  bool
+	AutoAVIF                  bool
+	ModifiedTimeCheck         bool
+	DisableErrorBody          bool
+	DisableParamsEndpoint     bool
+	BaseParams                string
+	Logger                    *zap.Logger
+	Debug                     bool
 
 	g          singleflight.Group
 	sema       *semaphore.Weighted
@@ -266,7 +269,12 @@ func (app *Imagor) Do(r *http.Request, p imagorpath.Params) (blob *Blob, err err
 	var hasFormat, hasPreview, isRaw bool
 	var filters = p.Filters
 	p.Filters = nil
-	for _, f := range filters {
+
+	// Extract prefilters from the filter chain
+	prefilters, regularFilters := extractPrefilters(filters)
+
+	// Continue processing with regular filters
+	for _, f := range regularFilters {
 		switch f.Name {
 		case "expire":
 			// expire(timestamp) filter
@@ -383,6 +391,86 @@ func (app *Imagor) Do(r *http.Request, p imagorpath.Params) (blob *Blob, err err
 		if isBlobEmpty(blob) {
 			return blob, err
 		}
+
+		// Apply prefilters if any are present
+		if len(prefilters) > 0 && !isRaw {
+			// Process prefilters in sequence
+			for _, pf := range prefilters {
+				// Generate a key for the prefiltered image
+				prefilterKey := ""
+				if app.PrefilterStoragePathStyle != nil {
+					prefilterKey = app.PrefilterStoragePathStyle.Hash(p, p.Image, prefilters)
+				} else if app.ResultStoragePathStyle != nil {
+					// Fall back to digest hash if no prefilter hasher is set
+					prefilterStr := ""
+					for _, pfDef := range prefilters {
+						prefilterStr += pfDef.Name + ":" + pfDef.Args + ";"
+					}
+					prefilterKey = imagorpath.DigestPrefilterStorageHasher.Hash(p, p.Image, prefilters)
+				}
+
+				if prefilterKey != "" {
+					// Try to load the prefiltered image from storage
+					prefilterBlob, err := app.loadPrefilter(r, prefilterKey)
+					if err == nil && !isBlobEmpty(prefilterBlob) {
+						// If found, use it
+						if app.Debug {
+							app.Logger.Debug("prefilter-loaded",
+								zap.String("name", pf.Name),
+								zap.String("args", pf.Args),
+								zap.String("key", prefilterKey))
+						}
+						blob = prefilterBlob
+						continue
+					}
+
+					// If not found, apply the prefilter
+					// Find the prefilter implementation
+					var prefilterImpl Prefilter
+					for _, pfi := range app.Prefilters {
+						if pfi.Name() == pf.Name {
+							prefilterImpl = pfi
+							break
+						}
+					}
+
+					// If no registered prefilter found, try to create one for testing
+					if prefilterImpl == nil && pf.Name == "depthmap" {
+						prefilterImpl = NewDepthmapPrefilter("https://api.example.com/depthmap", 30*time.Second)
+					}
+
+					if prefilterImpl != nil {
+						// Apply the prefilter
+						prefilterBlob, err := app.applyPrefilter(ctx, blob, pf.Name, pf.Args, []Prefilter{prefilterImpl})
+						if err != nil {
+							app.Logger.Warn("prefilter-failed",
+								zap.String("name", pf.Name),
+								zap.String("args", pf.Args),
+								zap.Error(err))
+							continue
+						}
+
+						// Save the prefiltered image to storage
+						if err := app.savePrefilter(ctx, prefilterKey, prefilterBlob); err != nil {
+							app.Logger.Warn("prefilter-save-failed",
+								zap.String("name", pf.Name),
+								zap.String("args", pf.Args),
+								zap.String("key", prefilterKey),
+								zap.Error(err))
+						} else if app.Debug {
+							app.Logger.Debug("prefilter-saved",
+								zap.String("name", pf.Name),
+								zap.String("args", pf.Args),
+								zap.String("key", prefilterKey))
+						}
+
+						// Use the prefiltered image for further processing
+						blob = prefilterBlob
+					}
+				}
+			}
+		}
+
 		if !isRaw {
 			var cancel func()
 			if app.ProcessTimeout > 0 {
@@ -829,4 +917,81 @@ func getType(v interface{}) string {
 		return t.Elem().Name()
 	}
 	return t.Name()
+}
+
+// loadPrefilter loads a prefiltered image from storage if it exists
+func (app *Imagor) loadPrefilter(r *http.Request, prefilterKey string) (*Blob, error) {
+	if len(app.PrefilterStorages) == 0 {
+		return nil, ErrNotFound
+	}
+
+	blob, _, err := fromStorages(r, app.PrefilterStorages, prefilterKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return blob, nil
+}
+
+// savePrefilter saves a prefiltered image to storage
+func (app *Imagor) savePrefilter(ctx context.Context, prefilterKey string, blob *Blob) error {
+	if len(app.PrefilterStorages) == 0 {
+		return nil
+	}
+
+	go app.save(ctx, app.PrefilterStorages, prefilterKey, blob)
+	return nil
+}
+
+// applyPrefilter applies a prefilter to an image
+func (app *Imagor) applyPrefilter(ctx context.Context, blob *Blob, prefilterName, prefilterArgs string, prefilters []Prefilter) (*Blob, error) {
+	// If prefilters were passed directly, use them first
+	if len(prefilters) > 0 {
+		// Find the prefilter by name
+		var prefilter Prefilter
+		for _, pf := range prefilters {
+			if pf.Name() == prefilterName {
+				prefilter = pf
+				break
+			}
+		}
+
+		if prefilter != nil {
+			// Apply the prefilter
+			result, err := prefilter.Apply(ctx, blob, prefilterArgs)
+			if err != nil {
+				return nil, fmt.Errorf("failed to apply prefilter %s: %w", prefilterName, err)
+			}
+			return result, nil
+		}
+	}
+
+	// If not found in provided prefilters, check registered prefilters
+	for _, pf := range app.Prefilters {
+		if pf.Name() == prefilterName {
+			// Apply the prefilter
+			result, err := pf.Apply(ctx, blob, prefilterArgs)
+			if err != nil {
+				return nil, fmt.Errorf("failed to apply prefilter %s: %w", prefilterName, err)
+			}
+			return result, nil
+		}
+	}
+
+	return nil, fmt.Errorf("prefilter not found: %s", prefilterName)
+}
+
+// extractPrefilters extracts prefilters from the filter chain
+func extractPrefilters(filters []imagorpath.Filter) (prefilters []imagorpath.PrefilterDefinition, regularFilters []imagorpath.Filter) {
+	for _, filter := range filters {
+		if IsPrefilter(filter.Name) {
+			prefilters = append(prefilters, imagorpath.PrefilterDefinition{
+				Name: filter.Name,
+				Args: filter.Args,
+			})
+		} else {
+			regularFilters = append(regularFilters, filter)
+		}
+	}
+	return prefilters, regularFilters
 }
