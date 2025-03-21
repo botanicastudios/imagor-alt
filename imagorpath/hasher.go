@@ -102,3 +102,42 @@ var SizeSuffixResultStorageHasher = ResultStorageHasherFunc(func(p Params) strin
 	}
 	return p.Image + hash // /abc/def.{digest}_{width}x{height}
 })
+
+// PrefilterStorageHasher interface for prefilter storage path generation
+type PrefilterStorageHasher interface {
+	Hash(p Params, image string, prefilters []PrefilterDefinition) string
+}
+
+// PrefilterStorageHasherFunc implements PrefilterStorageHasher
+type PrefilterStorageHasherFunc func(p Params, image string, prefilters []PrefilterDefinition) string
+
+func (f PrefilterStorageHasherFunc) Hash(p Params, image string, prefilters []PrefilterDefinition) string {
+	return f(p, image, prefilters)
+}
+
+// PrefilterDefinition represents a prefilter with its arguments
+type PrefilterDefinition struct {
+	Name string
+	Args string
+}
+
+// SuffixPrefilterStorageHasher PrefilterStorageHasher using storage path with digest suffix
+var SuffixPrefilterStorageHasher = PrefilterStorageHasherFunc(func(p Params, image string, prefilters []PrefilterDefinition) string {
+	var prefilterStr string
+	for _, pf := range prefilters {
+		prefilterStr += "_" + pf.Name
+		if pf.Args != "" {
+			prefilterStr += "_" + pf.Args
+		}
+	}
+
+	var digest = sha1.Sum([]byte(image + prefilterStr))
+	var hash = "." + hex.EncodeToString(digest[:])[:20]
+	var dotIdx = strings.LastIndex(image, ".")
+	var slashIdx = strings.LastIndex(image, "/")
+	if dotIdx > -1 && slashIdx < dotIdx {
+		ext := image[dotIdx:]
+		return image[:dotIdx] + hash + ext // /abc/def.{digest}.jpg
+	}
+	return image + hash // /abc/def.{digest}
+})

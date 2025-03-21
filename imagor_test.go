@@ -7,10 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/cshum/imagor/imagorpath"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/zap"
 	"io"
 	"math/rand"
 	"net/http"
@@ -19,7 +15,53 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/cshum/imagor/imagorpath"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 )
+
+// mockStorage implements Storage interface for testing
+type mockStorage struct {
+	store map[string][]byte
+}
+
+func newMockStorage() *mockStorage {
+	return &mockStorage{
+		store: make(map[string][]byte),
+	}
+}
+
+func (s *mockStorage) Get(_ *http.Request, image string) (*Blob, error) {
+	if data, ok := s.store[image]; ok {
+		return NewBlobFromBytes(data), nil
+	}
+	return nil, ErrNotFound
+}
+
+func (s *mockStorage) Put(_ context.Context, image string, blob *Blob) error {
+	data, err := blob.ReadAll()
+	if err != nil {
+		return err
+	}
+	s.store[image] = data
+	return nil
+}
+
+func (s *mockStorage) Delete(_ context.Context, image string) error {
+	delete(s.store, image)
+	return nil
+}
+
+func (s *mockStorage) Stat(_ context.Context, image string) (*Stat, error) {
+	if _, ok := s.store[image]; ok {
+		return &Stat{
+			ModifiedTime: time.Now(),
+		}, nil
+	}
+	return nil, ErrNotFound
+}
 
 func TestWithUnsafe(t *testing.T) {
 	logger := zap.NewExample()
@@ -910,7 +952,7 @@ func TestWithResultStorageNotModified(t *testing.T) {
 	w = httptest.NewRecorder()
 	r = httptest.NewRequest(
 		http.MethodGet, "https://example.com/unsafe/foo", nil)
-	r.Header.Set("If-Modified-Since", clock.Add(time.Hour).Format(http.TimeFormat))
+	r.Header.Set("If-Modified-Since", time.Now().Add(time.Hour).Format(http.TimeFormat))
 	app.ServeHTTP(w, r)
 	assert.Equal(t, 304, w.Code)
 	assert.Empty(t, w.Body.String())
@@ -1605,9 +1647,157 @@ type processorFunc func(ctx context.Context, blob *Blob, p imagorpath.Params, lo
 func (f processorFunc) Process(ctx context.Context, blob *Blob, p imagorpath.Params, load LoadFunc) (*Blob, error) {
 	return f(ctx, blob, p, load)
 }
-func (f processorFunc) Startup(_ context.Context) error {
+
+func (f processorFunc) Name() string {
+	return "test"
+}
+
+func (f processorFunc) Startup(ctx context.Context) error {
 	return nil
 }
-func (f processorFunc) Shutdown(_ context.Context) error {
+
+func (f processorFunc) Shutdown(ctx context.Context) error {
 	return nil
+}
+
+func TestPrefilter(t *testing.T) {
+	// Create test server
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("depthmap data"))
+	}))
+	defer server.Close()
+
+	// Create test storage
+	storage := newMockStorage()
+	prefilterStorage := newMockStorage()
+
+	// Create test image
+	testImage := "test.jpg"
+	if err := storage.Put(context.Background(), testImage, NewBlobFromBytes([]byte("test image data"))); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create Imagor instance with prefilter
+	app := New(
+		WithStorages(storage),
+		WithPrefilterStorages(prefilterStorage),
+		WithPrefilterStoragePathStyle(imagorpath.SuffixPrefilterStorageHasher),
+	)
+
+	// Add depthmap prefilter
+	depthmapPrefilter := NewDepthmapPrefilter(server.URL, time.Second*5)
+	removebgPrefilter := NewRemoveBGPrefilter(server.URL, time.Second*5)
+	app.Processors = append(app.Processors, depthmapPrefilter, removebgPrefilter)
+
+	// Test prefilter processing
+	t.Run("process depthmap prefilter", func(t *testing.T) {
+		params := imagorpath.Params{
+			Image: testImage,
+			Filters: []imagorpath.Filter{
+				{Name: "depthmap", Args: ""},
+				{Name: "resize", Args: "100x100"},
+			},
+		}
+
+		r := httptest.NewRequest(http.MethodGet, "https://example.com/"+testImage, nil)
+		blob, err := app.Do(r, params)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if blob == nil {
+			t.Fatal("expected non-nil blob")
+		}
+
+		// Verify prefilter storage
+		prefilterKey := imagorpath.SuffixPrefilterStorageHasher.Hash(params, testImage, []imagorpath.PrefilterDefinition{
+			{Name: "depthmap", Args: ""},
+		})
+		if _, err := prefilterStorage.Get(nil, prefilterKey); err != nil {
+			t.Errorf("expected prefilter result in storage: %v", err)
+		}
+	})
+
+	// Test prefilter caching
+	t.Run("reuse cached prefilter", func(t *testing.T) {
+		params := imagorpath.Params{
+			Image: testImage,
+			Filters: []imagorpath.Filter{
+				{Name: "depthmap", Args: ""},
+				{Name: "resize", Args: "200x200"},
+			},
+		}
+
+		r := httptest.NewRequest(http.MethodGet, "https://example.com/"+testImage, nil)
+
+		// First request should hit the API
+		blob1, err := app.Do(r, params)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Second request should use cached result
+		blob2, err := app.Do(r, params)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Verify both blobs are the same
+		reader1, _, err := blob1.NewReader()
+		if err != nil {
+			t.Fatalf("failed to create reader1: %v", err)
+		}
+		data1, err := io.ReadAll(reader1)
+		if err != nil {
+			t.Fatalf("failed to read blob1: %v", err)
+		}
+		reader2, _, err := blob2.NewReader()
+		if err != nil {
+			t.Fatalf("failed to create reader2: %v", err)
+		}
+		data2, err := io.ReadAll(reader2)
+		if err != nil {
+			t.Fatalf("failed to read blob2: %v", err)
+		}
+		if !bytes.Equal(data1, data2) {
+			t.Error("expected cached prefilter result to match")
+		}
+	})
+
+	// Test multiple prefilters
+	t.Run("process multiple prefilters", func(t *testing.T) {
+		params := imagorpath.Params{
+			Image: testImage,
+			Filters: []imagorpath.Filter{
+				{Name: "depthmap", Args: ""},
+				{Name: "removebg", Args: ""},
+				{Name: "resize", Args: "300x300"},
+			},
+		}
+
+		r := httptest.NewRequest(http.MethodGet, "https://example.com/"+testImage, nil)
+		blob, err := app.Do(r, params)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if blob == nil {
+			t.Fatal("expected non-nil blob")
+		}
+
+		// Verify prefilter storage for both prefilters
+		prefilterKey1 := imagorpath.SuffixPrefilterStorageHasher.Hash(params, testImage, []imagorpath.PrefilterDefinition{
+			{Name: "depthmap", Args: ""},
+		})
+		if _, err := prefilterStorage.Get(nil, prefilterKey1); err != nil {
+			t.Errorf("expected depthmap prefilter result in storage: %v", err)
+		}
+
+		prefilterKey2 := imagorpath.SuffixPrefilterStorageHasher.Hash(params, testImage, []imagorpath.PrefilterDefinition{
+			{Name: "depthmap", Args: ""},
+			{Name: "removebg", Args: ""},
+		})
+		if _, err := prefilterStorage.Get(nil, prefilterKey2); err != nil {
+			t.Errorf("expected removebg prefilter result in storage: %v", err)
+		}
+	})
 }

@@ -3,17 +3,18 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/cshum/imagor"
-	"github.com/cshum/imagor/imagorpath"
-	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cshum/imagor"
+	"github.com/cshum/imagor/imagorpath"
+	"github.com/stretchr/testify/assert"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 type testProcessor struct {
@@ -23,6 +24,10 @@ type testProcessor struct {
 
 func (app *testProcessor) Process(ctx context.Context, blob *imagor.Blob, p imagorpath.Params, load imagor.LoadFunc) (*imagor.Blob, error) {
 	return nil, nil
+}
+
+func (app *testProcessor) Name() string {
+	return "test"
 }
 
 func (app *testProcessor) Startup(ctx context.Context) error {

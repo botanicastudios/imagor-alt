@@ -1,11 +1,13 @@
 package imagor
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/cshum/imagor/imagorpath"
+	"github.com/cshum/imagor/processor"
 	"go.uber.org/zap"
 	"golang.org/x/sync/semaphore"
 	"golang.org/x/sync/singleflight"
@@ -47,47 +50,158 @@ type Storage interface {
 // LoadFunc function handler for Processor to call loader
 type LoadFunc func(string) (*Blob, error)
 
-// Processor process image buffer
+// Processor interface for image processors
 type Processor interface {
-	// Startup processor startup lifecycle,
-	// called only once for the application lifetime
-	Startup(ctx context.Context) error
-
-	// Process Blob with given params and loader function
+	Name() string
 	Process(ctx context.Context, blob *Blob, params imagorpath.Params, load LoadFunc) (*Blob, error)
-
-	// Shutdown processor shutdown lifecycle,
-	// called only once for the application lifetime
+	Startup(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+}
+
+// Prefilter interface for prefilter implementations
+type Prefilter interface {
+	Name() string
+	Apply(ctx context.Context, blob *Blob, args string) (*Blob, error)
+}
+
+// HTTPPrefilter implements Prefilter interface for HTTP-based prefilters
+type HTTPPrefilter struct {
+	name    string
+	apiURL  string
+	client  *http.Client
+	timeout time.Duration
+}
+
+func (p *HTTPPrefilter) Name() string {
+	return p.name
+}
+
+// Process implements Processor interface
+func (p *HTTPPrefilter) Process(ctx context.Context, blob *Blob, params imagorpath.Params, load LoadFunc) (*Blob, error) {
+	return p.Apply(ctx, blob, "")
+}
+
+// Startup implements Processor interface
+func (p *HTTPPrefilter) Startup(ctx context.Context) error {
+	return nil
+}
+
+// Shutdown implements Processor interface
+func (p *HTTPPrefilter) Shutdown(ctx context.Context) error {
+	return nil
+}
+
+func (p *HTTPPrefilter) Apply(ctx context.Context, blob *Blob, args string) (*Blob, error) {
+	// Create form data
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add source URL - use image path if available
+	sourceURL := ""
+	if blob.Header != nil {
+		sourceURL = blob.Header.Get("X-Source-URL")
+	}
+	if err := writer.WriteField("source_url", sourceURL); err != nil {
+		return nil, err
+	}
+
+	// Add args if any
+	if args != "" {
+		if err := writer.WriteField("args", args); err != nil {
+			return nil, err
+		}
+	}
+
+	// Close writer
+	if err := writer.Close(); err != nil {
+		return nil, err
+	}
+
+	// Create request
+	req, err := http.NewRequestWithContext(ctx, "POST", p.apiURL, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	// Send request
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("prefilter API returned status %d", resp.StatusCode)
+	}
+
+	// Read response body
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewBlobFromBytes(data), nil
+}
+
+// NewDepthmapPrefilter creates a new depthmap prefilter
+func NewDepthmapPrefilter(apiURL string, timeout time.Duration) *HTTPPrefilter {
+	return &HTTPPrefilter{
+		name:    "depthmap",
+		apiURL:  apiURL,
+		client:  &http.Client{Timeout: timeout},
+		timeout: timeout,
+	}
+}
+
+// NewRemoveBGPrefilter creates a new removebg prefilter
+func NewRemoveBGPrefilter(apiURL string, timeout time.Duration) *HTTPPrefilter {
+	return &HTTPPrefilter{
+		name:    "removebg",
+		apiURL:  apiURL,
+		client:  &http.Client{Timeout: timeout},
+		timeout: timeout,
+	}
+}
+
+// isPrefilter checks if a filter is a prefilter
+func isPrefilter(filterName string) bool {
+	prefilters := map[string]bool{
+		"depthmap": true,
+		"removebg": true,
+	}
+	return prefilters[filterName]
 }
 
 // Imagor main application
 type Imagor struct {
-	Unsafe                 bool
-	Signer                 imagorpath.Signer
-	StoragePathStyle       imagorpath.StorageHasher
-	ResultStoragePathStyle imagorpath.ResultStorageHasher
-	BasePathRedirect       string
-	Loaders                []Loader
-	Storages               []Storage
-	ResultStorages         []Storage
-	Processors             []Processor
-	RequestTimeout         time.Duration
-	LoadTimeout            time.Duration
-	SaveTimeout            time.Duration
-	ProcessTimeout         time.Duration
-	CacheHeaderTTL         time.Duration
-	CacheHeaderSWR         time.Duration
-	ProcessConcurrency     int64
-	ProcessQueueSize       int64
-	AutoWebP               bool
-	AutoAVIF               bool
-	ModifiedTimeCheck      bool
-	DisableErrorBody       bool
-	DisableParamsEndpoint  bool
-	BaseParams             string
-	Logger                 *zap.Logger
-	Debug                  bool
+	Unsafe                    bool
+	Signer                    imagorpath.Signer
+	StoragePathStyle          imagorpath.StorageHasher
+	ResultStoragePathStyle    imagorpath.ResultStorageHasher
+	PrefilterStoragePathStyle imagorpath.PrefilterStorageHasher
+	BasePathRedirect          string
+	Loaders                   []Loader
+	Storages                  []Storage
+	ResultStorages            []Storage
+	PrefilterStorages         []Storage
+	Processors                []Processor
+	RequestTimeout            time.Duration
+	LoadTimeout               time.Duration
+	SaveTimeout               time.Duration
+	ProcessTimeout            time.Duration
+	CacheHeaderTTL            time.Duration
+	CacheHeaderSWR            time.Duration
+	ProcessConcurrency        int64
+	ProcessQueueSize          int64
+	AutoWebP                  bool
+	AutoAVIF                  bool
+	ModifiedTimeCheck         bool
+	DisableErrorBody          bool
+	DisableParamsEndpoint     bool
+	BaseParams                string
+	Logger                    *zap.Logger
+	Debug                     bool
 
 	g          singleflight.Group
 	sema       *semaphore.Weighted
@@ -388,6 +502,14 @@ func (app *Imagor) Do(r *http.Request, p imagorpath.Params) (blob *Blob, err err
 			if app.ProcessTimeout > 0 {
 				ctx, cancel = context.WithTimeout(ctx, app.ProcessTimeout)
 				contextDefer(ctx, cancel)
+			}
+			// Process prefilters first
+			blob, err = app.processPrefilters(ctx, blob, p.Filters, load)
+			if err != nil {
+				if app.Debug {
+					app.Logger.Debug("prefilter", zap.Any("params", p), zap.Error(err))
+				}
+				return blob, err
 			}
 			var forwardP = p
 			for _, processor := range app.Processors {
@@ -829,4 +951,112 @@ func getType(v interface{}) string {
 		return t.Elem().Name()
 	}
 	return t.Name()
+}
+
+// processPrefilters processes prefilters in sequence
+func (app *Imagor) processPrefilters(ctx context.Context, blob *Blob, filters []imagorpath.Filter, load LoadFunc) (*Blob, error) {
+	// Separate prefilters from regular filters
+	var prefilters []imagorpath.Filter
+	var regularFilters []imagorpath.Filter
+
+	for _, f := range filters {
+		if processor.IsPrefilter(f.Name) {
+			prefilters = append(prefilters, f)
+		} else {
+			regularFilters = append(regularFilters, f)
+		}
+	}
+
+	// If no prefilters, return original blob and filters
+	if len(prefilters) == 0 {
+		return blob, nil
+	}
+
+	// Get image path from header or blob filepath
+	var imagePath string
+	if blob.Header != nil {
+		imagePath = blob.Header.Get("X-Source-URL")
+	}
+	if imagePath == "" {
+		imagePath = blob.FilePath()
+	}
+
+	// Process prefilters first
+	var err error
+	var appliedPrefilters []imagorpath.PrefilterDefinition
+	for _, f := range prefilters {
+		// Find prefilter processor
+		var prefilterProc Processor
+		for _, p := range app.Processors {
+			if p.Name() == f.Name {
+				prefilterProc = p
+				break
+			}
+		}
+		if prefilterProc == nil {
+			return nil, fmt.Errorf("prefilter %s not found", f.Name)
+		}
+
+		// Add to applied prefilters
+		appliedPrefilters = append(appliedPrefilters, imagorpath.PrefilterDefinition{
+			Name: f.Name,
+			Args: f.Args,
+		})
+
+		// Check prefilter storage first
+		var prefilterKey string
+		if app.PrefilterStoragePathStyle != nil && imagePath != "" {
+			// Create storage key using prefilter hasher
+			prefilterParams := imagorpath.Params{
+				Image:   imagePath,
+				Filters: filters,
+			}
+			prefilterKey = app.PrefilterStoragePathStyle.Hash(prefilterParams, imagePath, appliedPrefilters)
+		}
+
+		if prefilterKey != "" {
+			if storedBlob, err := app.loadPrefilterResult(ctx, prefilterKey); err == nil && storedBlob != nil {
+				// Preserve source URL in stored blob
+				if storedBlob.Header == nil {
+					storedBlob.Header = make(http.Header)
+				}
+				storedBlob.Header.Set("X-Source-URL", imagePath)
+				blob = storedBlob
+				continue
+			}
+		}
+
+		// Process with prefilter
+		blob, err = prefilterProc.Process(ctx, blob, imagorpath.Params{}, load)
+		if err != nil {
+			return nil, fmt.Errorf("prefilter %s failed: %w", f.Name, err)
+		}
+
+		// Preserve source URL in processed blob
+		if blob.Header == nil {
+			blob.Header = make(http.Header)
+		}
+		blob.Header.Set("X-Source-URL", imagePath)
+
+		// Store result in prefilter storage
+		if prefilterKey != "" && len(app.PrefilterStorages) > 0 {
+			app.save(ctx, app.PrefilterStorages, prefilterKey, blob)
+		}
+	}
+
+	// Return blob and remaining filters
+	filters = regularFilters
+	return blob, nil
+}
+
+func (app *Imagor) loadPrefilterResult(ctx context.Context, key string) (*Blob, error) {
+	if key == "" {
+		return nil, ErrNotFound
+	}
+	for _, storage := range app.PrefilterStorages {
+		if blob, err := storage.Get(nil, key); err == nil && blob != nil {
+			return blob, nil
+		}
+	}
+	return nil, ErrNotFound
 }

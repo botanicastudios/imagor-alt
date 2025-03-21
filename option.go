@@ -1,9 +1,10 @@
 package imagor
 
 import (
+	"time"
+
 	"github.com/cshum/imagor/imagorpath"
 	"go.uber.org/zap"
-	"time"
 )
 
 // Option imagor option
@@ -224,6 +225,22 @@ func WithSigner(signer imagorpath.Signer) Option {
 	return func(app *Imagor) {
 		if signer != nil {
 			app.Signer = signer
+		}
+	}
+}
+
+// WithPrefilterStorages sets prefilter storages
+func WithPrefilterStorages(storages ...Storage) Option {
+	return func(app *Imagor) {
+		app.PrefilterStorages = append(app.PrefilterStorages, storages...)
+	}
+}
+
+// WithPrefilterStoragePathStyle sets prefilter storage path style
+func WithPrefilterStoragePathStyle(hasher imagorpath.PrefilterStorageHasher) Option {
+	return func(app *Imagor) {
+		if hasher != nil {
+			app.PrefilterStoragePathStyle = hasher
 		}
 	}
 }

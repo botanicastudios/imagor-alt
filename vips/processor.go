@@ -404,3 +404,7 @@ func WrapErr(err error) error {
 	}
 	return imagor.NewError(msg, 406)
 }
+
+func (p *Processor) Name() string {
+	return "vips"
+}

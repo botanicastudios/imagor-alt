@@ -2,14 +2,15 @@ package filestorage
 
 import (
 	"context"
-	"github.com/cshum/imagor"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"os"
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/cshum/imagor"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFileStore_Path(t *testing.T) {
@@ -210,7 +211,7 @@ func TestFileStorage_Load_Save(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "bar", string(buf))
 
-		time.Sleep(time.Second)
+		time.Sleep(time.Millisecond * 20) // Wait longer than expiration time
 		_, err = checkBlob(s.Get(r, "/foo/bar/asdf"))
 		require.ErrorIs(t, err, imagor.ErrExpired)
 	})
