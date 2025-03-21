@@ -2,8 +2,6 @@ package filestorage
 
 import (
 	"context"
-	"github.com/cshum/imagor"
-	"github.com/cshum/imagor/imagorpath"
 	"io"
 	"net/http"
 	"os"
@@ -11,6 +9,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/cshum/imagor"
+	"github.com/cshum/imagor/imagorpath"
 )
 
 var dotFileRegex = regexp.MustCompile("/\\.")
@@ -65,12 +66,23 @@ func (s *FileStorage) Get(_ *http.Request, image string) (*imagor.Blob, error) {
 	if !ok {
 		return nil, imagor.ErrInvalid
 	}
-	return imagor.NewBlobFromFile(image, func(stat os.FileInfo) error {
-		if s.Expiration > 0 && time.Now().Sub(stat.ModTime()) > s.Expiration {
-			return imagor.ErrExpired
+
+	// Check expiration first if needed
+	if s.Expiration > 0 {
+		stat, err := os.Stat(image)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, imagor.ErrNotFound
+			}
+			return nil, err
 		}
-		return nil
-	}), nil
+
+		if time.Now().Sub(stat.ModTime()) > s.Expiration {
+			return nil, imagor.ErrExpired
+		}
+	}
+
+	return imagor.NewBlobFromFile(image), nil
 }
 
 // Put implements imagor.Storage interface

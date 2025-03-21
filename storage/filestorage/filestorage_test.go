@@ -2,14 +2,15 @@ package filestorage
 
 import (
 	"context"
-	"github.com/cshum/imagor"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"net/http"
 	"os"
 	"regexp"
 	"testing"
 	"time"
+
+	"github.com/cshum/imagor"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestFileStore_Path(t *testing.T) {
@@ -197,22 +198,26 @@ func TestFileStorage_Load_Save(t *testing.T) {
 	})
 
 	t.Run("expiration", func(t *testing.T) {
-		s := New(dir, WithExpiration(time.Millisecond*10))
+		s := New(dir, WithExpiration(time.Millisecond*500))
 		var err error
 
-		_, err = checkBlob(s.Get(r, "/foo/bar/asdf"))
+		_, err = s.Get(r, "/foo/bar/asdf")
 		assert.Equal(t, imagor.ErrNotFound, err)
+
 		blob := imagor.NewBlobFromBytes([]byte("bar"))
 		require.NoError(t, s.Put(ctx, "/foo/bar/asdf", blob))
-		b, err := checkBlob(s.Get(r, "/foo/bar/asdf"))
+
+		b, err := s.Get(r, "/foo/bar/asdf")
 		require.NoError(t, err)
+		require.NotNil(t, b)
 		buf, err := b.ReadAll()
 		require.NoError(t, err)
 		assert.Equal(t, "bar", string(buf))
 
 		time.Sleep(time.Second)
-		_, err = checkBlob(s.Get(r, "/foo/bar/asdf"))
-		require.ErrorIs(t, err, imagor.ErrExpired)
+
+		_, err = s.Get(r, "/foo/bar/asdf")
+		assert.Equal(t, imagor.ErrExpired, err)
 	})
 }
 
