@@ -152,6 +152,8 @@ func (p *HTTPPrefilter) Apply(ctx context.Context, blob *Blob, args string) (*Bl
 }
 ```
 
+The URL for each prefilter should be configurable in Imagor options, e.g. IMAGOR_PREFILTER_DEPTHMAP_API="https://prefilter-service.example.com/api/depthmap". It should be a POST request which submits the source image URL in the body, i.e. `source_url=http://example.com/assets/frog.jpg` (if the source is HTTP loader then we can use that URL, if the source is a different type of loader we should provide the current imagor server URL to the source file).
+
 #### Initial Prefilters
 
 Implement the `depthmap` prefilter using an HTTP client:
@@ -208,19 +210,24 @@ Ensure proper error handling and fallback mechanisms if a prefilter fails.
 
 ## Testing Strategy
 
-2. **Integration Tests**
+1. **Integration Tests**
 
    - Test the full prefilter processing pipeline
    - Test interaction with external APIs (with mocks)
    - Test storage and retrieval of prefiltered images
 
-3. **Mock External APIs**
+2. **Mock External APIs**
 
    - Create mock servers for external prefilter APIs
    - Simulate various response scenarios (success, failure, timeout)
 
-4. **End-to-End Tests**
+3. **End-to-End Tests**
 
    - Test the entire system with real-world image processing scenarios
    - Verify correct behavior with multiple prefilters
    - Confirm that the cache works as expected over multiple requests
+
+Test data is available for `depthmap`:
+
+testdata/frog.jpg -- source file
+testdata/depth_map.png -- output of the depth map API which can be moved to the correct place/name in the testdata folder
