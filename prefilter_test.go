@@ -2,6 +2,7 @@ package imagor
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -330,9 +331,22 @@ func TestHTTPPrefilter(t *testing.T) {
 		// Check that we received the correct request
 		assert.Equal(t, "POST", r.Method)
 
-		// Check that content type is set but don't be specific about what it is
-		// since the implementation could use different content types
-		if contentType := r.Header.Get("Content-Type"); contentType != "" {
+		// Verify that content type is application/json when image_url is sent
+		contentType := r.Header.Get("Content-Type")
+		if r.Header.Get("Content-Type") == "application/json" {
+			// Read the uploaded JSON
+			body, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+			assert.NotEmpty(t, body)
+
+			// Verify it's valid JSON with the expected structure
+			var requestData map[string]string
+			err = json.Unmarshal(body, &requestData)
+			assert.NoError(t, err)
+			assert.Contains(t, requestData, "image_url")
+			assert.Equal(t, "http://example.com/test.jpg", requestData["image_url"])
+		} else {
+			// For direct image upload, the content-type should be different
 			assert.NotEmpty(t, contentType)
 
 			// Read the uploaded image
@@ -364,7 +378,7 @@ func TestHTTPPrefilter(t *testing.T) {
 	if blob.Header == nil {
 		blob.Header = make(http.Header)
 	}
-	blob.Header.Set("source_url", "http://example.com/test.jpg")
+	blob.Header.Set("image_url", "http://example.com/test.jpg")
 
 	// Apply the prefilter
 	ctx := context.Background()
@@ -375,7 +389,7 @@ func TestHTTPPrefilter(t *testing.T) {
 	assert.Equal(t, "image/png", resultBlob.ContentType())
 
 	// Test without source URL (direct upload)
-	blob.Header.Del("source_url")
+	blob.Header.Del("image_url")
 
 	resultBlob2, err := prefilter.Apply(ctx, blob, "")
 

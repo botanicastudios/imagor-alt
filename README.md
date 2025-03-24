@@ -81,14 +81,14 @@ imagor supports the following filters:
 - `auto_levels(strength)` re-maps the image luminance so the darkest pixel becomes black and the lightest becomes white.
   - `strength` 0 to 100, the percentage that the auto levels filter will be applied
 - `background_color(color)` sets the background color of a transparent image
-  - `color` the color name or hexadecimal rgb expression without the “#” character
+  - `color` the color name or hexadecimal rgb expression without the "#" character
 - `blur(sigma)` applies gaussian blur to the image
 - `brightness(amount)` increases or decreases the image brightness
   - `amount` -100 to 100, the amount in % to increase or decrease the image brightness
 - `contrast(amount)` increases or decreases the image contrast
   - `amount` -100 to 100, the amount in % to increase or decrease the image contrast
 - `fill(color)` fill the missing area or transparent image with the specified color:
-  - `color` - color name or hexadecimal rgb expression without the “#” character
+  - `color` - color name or hexadecimal rgb expression without the "#" character
     - If color is "blur" - missing parts are filled with blurred original image
     - If color is "auto" - the top left image pixel will be chosen as the filling color
     - If color is "none" - the filling would become fully transparent
@@ -111,7 +111,7 @@ imagor supports the following filters:
     - Number followed by a `p` e.g. 20p means calculating the value from the image height as percentage
     - `top`,`bottom`,`center` vertical align top, bottom or centered respectively
   - `size` - text label font size
-  - `color` - color name or hexadecimal rgb expression without the “#” character
+  - `color` - color name or hexadecimal rgb expression without the "#" character
   - `alpha` - text label transparency, a number between 0 (fully opaque) and 100 (fully transparent).
   - `font` - text label font type
 - `max_bytes(amount)` automatically degrades the quality of the image until the image is under the specified `amount` of bytes
@@ -128,7 +128,7 @@ imagor supports the following filters:
   - `angle` accepts 0, 90, 180, 270
 - `round_corner(rx [, ry [, color]])` adds rounded corners to the image with the specified color as background
   - `rx`, `ry` amount of pixel to use as radius. ry = rx if ry is not provided
-  - `color` the color name or hexadecimal rgb expression without the “#” character
+  - `color` the color name or hexadecimal rgb expression without the "#" character
 - `saturation(amount)` increases or decreases the image saturation
   - `amount` -100 to 100, the amount in % to increase or decrease the image saturation
 - `sharpen(sigma)` sharpens the image
@@ -834,4 +834,16 @@ Usage of imagor:
         VIPS avif speed, the lowest is at 0 and the fastest is at 9 (Default 5).
   -vips-strip-metadata
         VIPS strips all metadata from the resulting image
+
+| IMAGOR_PREFILTER_STORAGE_PATH_STYLE | Prefilter storage path style: original, digest | original |
+| IMAGOR_PREFILTER_DEPTHMAP_API | API URL for the depthmap prefilter | |
+| IMAGOR_PREFILTER_DEPTHMAP_TIMEOUT | Timeout for depthmap prefilter API calls | 60s |
+| IMAGOR_PREFILTER_REMOVEBG_API | API URL for the removebg prefilter | |
+| IMAGOR_PREFILTER_REMOVEBG_TIMEOUT | Timeout for removebg prefilter API calls | 60s |
+| FILE_PREFILTER_STORAGE_BASE_DIR | Base directory for File Prefilter Storage | |
+| FILE_PREFILTER_STORAGE_PATH_PREFIX | Base path prefix for File Prefilter Storage | |
+| FILE_PREFILTER_STORAGE_MKDIR_PERMISSION | File Prefilter Storage mkdir permission | 0755 |
+| FILE_PREFILTER_STORAGE_WRITE_PERMISSION | File Prefilter Storage write permission | 0666 |
+| FILE_PREFILTER_STORAGE_EXPIRATION | File Prefilter Storage expiration duration | no expiration |
+| FILE_PREFILTER_STORAGE_PATH_STYLE | Prefilter storage path style | digest |
 ```

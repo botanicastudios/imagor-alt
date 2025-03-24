@@ -4,6 +4,8 @@
 
 The prefilters feature adds support for expensive image processing operations that are cached separately from regular filters. When an image URL includes a prefilter, the system first checks if a prefiltered version exists in prefilterStorage. If it does, that version is loaded and the rest of the filter chain is applied to it. If not, the prefilter operation is performed, the result is saved to prefilterStorage, and then the remaining filters are applied.
 
+If no prefilterStorage is configured, prefilters should still be executed as part of the filter chain, but without any loading or saving of intermediate results.
+
 ## Key Features
 
 1. **Prefilter Processing Logic**
@@ -33,6 +35,7 @@ The prefilters feature adds support for expensive image processing operations th
    - System checks prefilterStorage for cached versions
    - If found, loads the most applicable prefiltered version
    - If not found, processes the prefilters in sequence and saves results to prefilterStorage
+   - If no prefilterStorage is configured, prefilters are still executed but without loading or saving intermediate results
 
 2. Configuration:
 
@@ -105,9 +108,11 @@ Modify the processing flow in the `Do` method of Imagor to:
 
 1. Parse the URL and detect prefilters
 2. Determine the optimal chain of prefilters to apply
-3. For each step, check if it exists in prefilterStorage
-4. If found, load it and continue processing
-5. If not found, apply the prefilter, save to prefilterStorage, and continue
+3. For each step, check if prefilterStorage is configured:
+   - If configured, check if the prefiltered version exists in prefilterStorage
+   - If found, load it and continue processing
+   - If not found, apply the prefilter, save to prefilterStorage, and continue
+   - If prefilterStorage is not configured, apply the prefilter without loading or saving, and continue
 
 #### Prefilter Storage Logic
 
@@ -152,7 +157,7 @@ func (p *HTTPPrefilter) Apply(ctx context.Context, blob *Blob, args string) (*Bl
 }
 ```
 
-The URL for each prefilter should be configurable in Imagor options, e.g. IMAGOR_PREFILTER_DEPTHMAP_API="https://prefilter-service.example.com/api/depthmap". It should be a POST request which submits the source image URL in the body, i.e. `source_url=http://example.com/assets/frog.jpg` (if the source is HTTP loader then we can use that URL, if the source is a different type of loader we should provide the current imagor server URL to the source file).
+The URL for each prefilter should be configurable in Imagor options, e.g. IMAGOR_PREFILTER_DEPTHMAP_API="https://prefilter-service.example.com/api/depthmap". It should be a POST request which submits the source image URL in the body as JSON, e.g. `{"image_url":"http://example.com/assets/frog.jpg"}` (if the source is HTTP loader then we can use that URL, if the source is a different type of loader we should provide the current imagor server URL to the source file).
 
 #### Initial Prefilters
 
@@ -201,6 +206,7 @@ Ensure proper error handling and fallback mechanisms if a prefilter fails.
    - Keys for prefilterStorage should take into account the source image path and all prefilter parameters
    - Support for IMAGOR_PREFILTER_STORAGE_PATH_STYLE with options like "digest" or "suffix"
    - Format depends on chosen hash style (consistent with other storage mechanisms)
+   - Key generation should only occur when prefilterStorage is configured
 
 2. **Error Handling**
 

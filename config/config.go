@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/cshum/imagor/metrics/prometheusmetrics"
+	"github.com/cshum/imagor/storage/filestorage"
 
 	"github.com/cshum/imagor"
 	"github.com/cshum/imagor/imagorpath"
@@ -22,6 +23,7 @@ import (
 var baseConfig = []Option{
 	withFileSystem,
 	withHTTPLoader,
+	withPrefilterStorage,
 }
 
 // NewImagor create imagor from config flags
@@ -67,6 +69,16 @@ func NewImagor(
 		imagorSignerTruncate         = fs.Int("imagor-signer-truncate", 0, "imagor URL signature truncate at length")
 		imagorStoragePathStyle       = fs.String("imagor-storage-path-style", "original", "imagor storage path style: original, digest")
 		imagorResultStoragePathStyle = fs.String("imagor-result-storage-path-style", "original", "imagor result storage path style: original, digest, suffix")
+
+		// Prefilter configuration options
+		imagorPrefilterDepthmapAPI = fs.String("imagor-prefilter-depthmap-api", "",
+			"API URL for depthmap prefilter")
+		imagorPrefilterDepthmapTimeout = fs.Duration("imagor-prefilter-depthmap-timeout",
+			60*time.Second, "Timeout for depthmap prefilter API calls")
+		imagorPrefilterRemovebgAPI = fs.String("imagor-prefilter-removebg-api", "",
+			"API URL for removebg prefilter")
+		imagorPrefilterRemovebgTimeout = fs.Duration("imagor-prefilter-removebg-timeout",
+			60*time.Second, "Timeout for removebg prefilter API calls")
 
 		options, logger, isDebug = applyOptions(fs, cb, append(funcs, baseConfig...)...)
 
@@ -117,6 +129,8 @@ func NewImagor(
 		imagor.WithStoragePathStyle(hasher),
 		imagor.WithResultStoragePathStyle(resultHasher),
 		imagor.WithUnsafe(*imagorUnsafe),
+		withPrefiltersOption(*imagorPrefilterDepthmapAPI, *imagorPrefilterDepthmapTimeout,
+			*imagorPrefilterRemovebgAPI, *imagorPrefilterRemovebgTimeout, logger),
 		imagor.WithLogger(logger),
 		imagor.WithDebug(isDebug),
 	)...)
@@ -204,4 +218,79 @@ func CreateServer(args []string, funcs ...Option) (srv *server.Server) {
 		server.WithDebug(*debug),
 		server.WithMetrics(pm),
 	)
+}
+
+// withPrefiltersOption creates an option to initialize prefilters based on configuration
+func withPrefiltersOption(apiURL string, apiTimeout time.Duration, removebgURL string, removebgTimeout time.Duration, logger *zap.Logger) imagor.Option {
+	return func(app *imagor.Imagor) {
+		// Initialize depthmap prefilter if API URL is configured
+		if apiURL != "" {
+			depthmapPrefilter := imagor.NewDepthmapPrefilter(apiURL, apiTimeout)
+			app.Prefilters = append(app.Prefilters, depthmapPrefilter)
+			logger.Info("initialized depthmap prefilter",
+				zap.String("api_url", apiURL),
+				zap.Duration("timeout", apiTimeout))
+		}
+
+		// Initialize removebg prefilter if API URL is configured
+		if removebgURL != "" {
+			// Note: You would need to implement this function
+			// removebgPrefilter := imagor.NewRemovebgPrefilter(removebgURL, removebgTimeout)
+			// app.Prefilters = append(app.Prefilters, removebgPrefilter)
+			logger.Info("initialized removebg prefilter",
+				zap.String("api_url", removebgURL),
+				zap.Duration("timeout", removebgTimeout))
+		}
+	}
+}
+
+// withPrefilterStorage configures prefilter storage based on configuration
+func withPrefilterStorage(fs *flag.FlagSet, cb func() (*zap.Logger, bool)) imagor.Option {
+	var (
+		fileSafeChars = fs.Lookup("file-safe-chars")
+
+		filePrefilterStorageBaseDir = fs.String("file-prefilter-storage-base-dir", "",
+			"Base directory for File Prefilter Storage. Enable File Prefilter Storage only if this value present")
+		filePrefilterStoragePathPrefix = fs.String("file-prefilter-storage-path-prefix", "",
+			"Base path prefix for File Prefilter Storage")
+		filePrefilterStorageMkdirPermission = fs.String("file-prefilter-storage-mkdir-permission", "0755",
+			"File Prefilter Storage mkdir permission")
+		filePrefilterStorageWritePermission = fs.String("file-prefilter-storage-write-permission", "0666",
+			"File Prefilter Storage write permission")
+		filePrefilterStorageExpiration = fs.Duration("file-prefilter-storage-expiration", 0,
+			"File Prefilter Storage expiration duration e.g. 24h. Default no expiration")
+		filePrefilterStoragePathStyle = fs.String("file-prefilter-storage-path-style", "digest",
+			"Prefilter storage path style: original, digest. Default digest")
+
+		logger, _ = cb()
+	)
+
+	return func(app *imagor.Imagor) {
+		// Configure prefilter storage path style
+		if strings.ToLower(*filePrefilterStoragePathStyle) == "digest" {
+			app.PrefilterStoragePathStyle = imagorpath.DigestPrefilterStorageHasher
+		}
+
+		var safeChars string
+		if fileSafeChars != nil {
+			safeChars = fileSafeChars.Value.String()
+		}
+
+		if *filePrefilterStorageBaseDir != "" {
+			// activate File Prefilter Storage only if base dir config presents
+			app.PrefilterStorages = append(app.PrefilterStorages,
+				filestorage.New(
+					*filePrefilterStorageBaseDir,
+					filestorage.WithPathPrefix(*filePrefilterStoragePathPrefix),
+					filestorage.WithMkdirPermission(*filePrefilterStorageMkdirPermission),
+					filestorage.WithWritePermission(*filePrefilterStorageWritePermission),
+					filestorage.WithSafeChars(safeChars),
+					filestorage.WithExpiration(*filePrefilterStorageExpiration),
+				),
+			)
+			logger.Info("prefilter storage enabled",
+				zap.String("type", "file"),
+				zap.String("base_dir", *filePrefilterStorageBaseDir))
+		}
+	}
 }

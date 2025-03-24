@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"net/url"
-	"strings"
 	"time"
 )
 
@@ -40,95 +40,119 @@ func (p *HTTPPrefilter) Apply(ctx context.Context, blob *Blob, args string) (*Bl
 		return nil, fmt.Errorf("no API URL configured for prefilter %s", p.name)
 	}
 
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(ctx, p.timeout)
+	// Create a context with the configured timeout
+	timeoutCtx, cancel := context.WithTimeout(ctx, p.timeout)
 	defer cancel()
 
-	// Prepare the request data
-	data := url.Values{}
-
 	// If the blob has a source URL, provide it to the API
-	if blob.Header != nil && blob.Header.Get("source_url") != "" {
-		data.Set("source_url", blob.Header.Get("source_url"))
-	} else {
-		// If no source URL, upload the image data
-		// For this, we need to convert the request to a multipart form
-		return p.uploadAndProcess(ctx, blob, args)
-	}
-
-	// Add any arguments if provided
-	if args != "" {
-		data.Set("args", args)
-	}
-
-	// Create HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", p.apiURL, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request for prefilter %s: %w", p.name, err)
-	}
-
-	// Set headers
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("User-Agent", "Imagor-Prefilter/"+Version)
-
-	// Send request
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request to prefilter %s: %w", p.name, err)
-	}
-	defer resp.Body.Close()
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		// Try to read error message from response
-		var errorResponse struct {
-			Error string `json:"error"`
+	if blob.Header != nil && blob.Header.Get("image_url") != "" {
+		// Create request payload as JSON
+		requestData := map[string]string{
+			"image_url": blob.Header.Get("image_url"),
 		}
 
-		body, _ := io.ReadAll(resp.Body)
-		if err := json.Unmarshal(body, &errorResponse); err == nil && errorResponse.Error != "" {
-			return nil, fmt.Errorf("prefilter %s API error: %s", p.name, errorResponse.Error)
+		// Add any arguments if provided
+		if args != "" {
+			requestData["args"] = args
 		}
 
-		return nil, fmt.Errorf("prefilter %s API returned status %d", p.name, resp.StatusCode)
-	}
-
-	// Read and process the response
-	resultData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response from prefilter %s: %w", p.name, err)
-	}
-
-	// Create a new blob with the result
-	resultBlob := NewBlobFromBytes(resultData)
-
-	// Copy metadata from the original blob
-	if blob.Header != nil {
-		if resultBlob.Header == nil {
-			resultBlob.Header = http.Header{}
+		// Marshal to JSON
+		jsonData, err := json.Marshal(requestData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal JSON for prefilter %s: %w", p.name, err)
 		}
-		for k, v := range blob.Header {
-			for _, val := range v {
-				resultBlob.Header.Add(k, val)
+
+		// Create HTTP request with the timeout context
+		req, err := http.NewRequestWithContext(timeoutCtx, "POST", p.apiURL, bytes.NewReader(jsonData))
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request for prefilter %s: %w", p.name, err)
+		}
+
+		// Set headers
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "Imagor-Prefilter/"+Version)
+
+		// Send request
+		resp, err := p.client.Do(req)
+
+		// Handle errors
+		if err != nil {
+			// Check if it's a timeout
+			if errors.Is(err, context.DeadlineExceeded) || timeoutCtx.Err() == context.DeadlineExceeded {
+				return nil, ErrTimeout
+			}
+
+			// Check for network timeout errors
+			var netErr net.Error
+			if errors.As(err, &netErr) && netErr.Timeout() {
+				return nil, ErrTimeout
+			}
+
+			return nil, fmt.Errorf("failed to send request to prefilter %s: %w", p.name, err)
+		}
+
+		if resp == nil {
+			return nil, fmt.Errorf("prefilter %s returned nil response", p.name)
+		}
+		defer resp.Body.Close()
+
+		// Check response status
+		if resp.StatusCode != http.StatusOK {
+			// Try to read error message from response
+			var errorResponse struct {
+				Error string `json:"error"`
+			}
+
+			body, _ := io.ReadAll(resp.Body)
+			if err := json.Unmarshal(body, &errorResponse); err == nil && errorResponse.Error != "" {
+				return nil, fmt.Errorf("prefilter %s API error: %s", p.name, errorResponse.Error)
+			}
+
+			return nil, fmt.Errorf("prefilter %s API returned status %d", p.name, resp.StatusCode)
+		}
+
+		// Read and process the response
+		resultData, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read response from prefilter %s: %w", p.name, err)
+		}
+
+		// Check for empty response
+		if len(resultData) == 0 {
+			return nil, fmt.Errorf("prefilter %s returned empty response", p.name)
+		}
+
+		// Create a new blob with the result
+		resultBlob := NewBlobFromBytes(resultData)
+
+		// Copy metadata from the original blob
+		if blob.Header != nil {
+			if resultBlob.Header == nil {
+				resultBlob.Header = http.Header{}
+			}
+			for k, v := range blob.Header {
+				for _, val := range v {
+					resultBlob.Header.Add(k, val)
+				}
 			}
 		}
-	}
 
-	// Set the content type based on the response or keep the original if not specified
-	if contentType := resp.Header.Get("Content-Type"); contentType != "" {
-		resultBlob.SetContentType(contentType)
+		// Set the content type based on the response or keep the original if not specified
+		if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+			resultBlob.SetContentType(contentType)
+		} else {
+			resultBlob.SetContentType(blob.ContentType())
+		}
+
+		return resultBlob, nil
 	} else {
-		resultBlob.SetContentType(blob.ContentType())
+		// If no source URL, upload the image data
+		return p.uploadAndProcess(timeoutCtx, blob, args)
 	}
-
-	return resultBlob, nil
 }
 
 // uploadAndProcess handles the case where we need to upload the image data to the API
 func (p *HTTPPrefilter) uploadAndProcess(ctx context.Context, blob *Blob, args string) (*Blob, error) {
-	// For simplicity, we'll use a direct raw body upload
-	// In a production implementation, you might want to use multipart/form-data
-
 	// Read the blob data
 	blobData, err := blob.ReadAll()
 	if err != nil {
@@ -154,8 +178,25 @@ func (p *HTTPPrefilter) uploadAndProcess(ctx context.Context, blob *Blob, args s
 
 	// Send request
 	resp, err := p.client.Do(req)
+
+	// Handle errors
 	if err != nil {
+		// Check if it's a timeout
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded {
+			return nil, ErrTimeout
+		}
+
+		// Check for network timeout errors
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			return nil, ErrTimeout
+		}
+
 		return nil, fmt.Errorf("failed to upload to prefilter %s: %w", p.name, err)
+	}
+
+	if resp == nil {
+		return nil, fmt.Errorf("prefilter %s returned nil response", p.name)
 	}
 	defer resp.Body.Close()
 
@@ -178,6 +219,11 @@ func (p *HTTPPrefilter) uploadAndProcess(ctx context.Context, blob *Blob, args s
 	resultData, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response from prefilter %s: %w", p.name, err)
+	}
+
+	// Check for empty response
+	if len(resultData) == 0 {
+		return nil, fmt.Errorf("prefilter %s returned empty response", p.name)
 	}
 
 	// Create a new blob with the result
@@ -208,13 +254,30 @@ func (p *HTTPPrefilter) uploadAndProcess(ctx context.Context, blob *Blob, args s
 // NewDepthmapPrefilter creates a new depthmap prefilter
 func NewDepthmapPrefilter(apiURL string, timeout time.Duration) *HTTPPrefilter {
 	if timeout <= 0 {
-		timeout = 30 * time.Second
+		timeout = 60 * time.Second // Use a sensible default
+	}
+
+	// Create client with timeout
+	client := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+		},
 	}
 
 	return &HTTPPrefilter{
 		name:    "depthmap",
 		apiURL:  apiURL,
-		client:  &http.Client{},
+		client:  client,
 		timeout: timeout,
 	}
 }

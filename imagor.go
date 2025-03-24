@@ -436,13 +436,25 @@ func (app *Imagor) Do(r *http.Request, p imagorpath.Params) (blob *Blob, err err
 
 					// If no registered prefilter found, try to create one for testing
 					if prefilterImpl == nil && pf.Name == "depthmap" {
-						prefilterImpl = NewDepthmapPrefilter("https://api.example.com/depthmap", 30*time.Second)
+						app.Logger.Warn("depthmap prefilter not found and no API URL configured",
+							zap.String("name", pf.Name))
+						continue
 					}
 
 					if prefilterImpl != nil {
 						// Apply the prefilter
-						prefilterBlob, err := app.applyPrefilter(ctx, blob, pf.Name, pf.Args, []Prefilter{prefilterImpl})
+						prefilterBlob, err := app.applyPrefilter(ctx, blob, pf.Name, pf.Args, p.Image, []Prefilter{prefilterImpl})
 						if err != nil {
+							// Check if it's a timeout or other critical error that should be returned to the client
+							if errors.Is(err, ErrTimeout) {
+								app.Logger.Warn("prefilter-timeout",
+									zap.String("name", pf.Name),
+									zap.String("args", pf.Args),
+									zap.Error(err))
+								return nil, ErrTimeout
+							}
+
+							// For non-critical errors, log and continue with original image
 							app.Logger.Warn("prefilter-failed",
 								zap.String("name", pf.Name),
 								zap.String("args", pf.Args),
@@ -944,7 +956,23 @@ func (app *Imagor) savePrefilter(ctx context.Context, prefilterKey string, blob 
 }
 
 // applyPrefilter applies a prefilter to an image
-func (app *Imagor) applyPrefilter(ctx context.Context, blob *Blob, prefilterName, prefilterArgs string, prefilters []Prefilter) (*Blob, error) {
+func (app *Imagor) applyPrefilter(ctx context.Context, blob *Blob, prefilterName, prefilterArgs, imageURL string, prefilters []Prefilter) (*Blob, error) {
+	// Ensure the blob has a header so we can set the image_url
+	if blob.Header == nil {
+		blob.Header = http.Header{}
+	}
+
+	// Set the image_url header so the prefilter knows where to fetch the image from
+	if imageURL != "" {
+		blob.Header.Set("image_url", imageURL)
+
+		if app.Debug {
+			app.Logger.Debug("prefilter-set-image-url",
+				zap.String("image_url", imageURL),
+				zap.String("prefilter", prefilterName))
+		}
+	}
+
 	// If prefilters were passed directly, use them first
 	if len(prefilters) > 0 {
 		// Find the prefilter by name
