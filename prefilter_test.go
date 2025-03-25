@@ -61,6 +61,37 @@ func NewMockDepthmapPrefilter() *MockPrefilter {
 	}
 }
 
+// Setup a mock background removal prefilter that uses test files
+func NewMockRemoveBgPrefilter() *MockPrefilter {
+	return &MockPrefilter{
+		name: "removebg",
+		mockApply: func(ctx context.Context, blob *Blob, args string) (*Blob, error) {
+			// For testing, we'll just return a sample transparent PNG
+			transparentData, err := os.ReadFile("testdata/transparent.png")
+			if err != nil {
+				return nil, err
+			}
+
+			result := NewBlobFromBytes(transparentData)
+			result.SetContentType("image/png")
+
+			// Copy original metadata
+			if blob.Header != nil {
+				if result.Header == nil {
+					result.Header = make(http.Header)
+				}
+				for k, v := range blob.Header {
+					for _, val := range v {
+						result.Header.Add(k, val)
+					}
+				}
+			}
+
+			return result, nil
+		},
+	}
+}
+
 // MockFileStorage is a simple in-memory storage implementation for testing
 type MockFileStorage struct {
 	data     map[string][]byte
@@ -217,6 +248,29 @@ func TestDepthmapPrefilter(t *testing.T) {
 	resultData, err := resultBlob.ReadAll()
 	require.NoError(t, err)
 	assert.Equal(t, expectedData, resultData)
+}
+
+func TestRemoveBgPrefilter(t *testing.T) {
+	mockPrefilter := NewMockRemoveBgPrefilter()
+
+	assert.Equal(t, "removebg", mockPrefilter.Name())
+
+	// Read the test image
+	imgData, err := os.ReadFile("testdata/frog.jpg")
+	require.NoError(t, err)
+
+	blob := NewBlobFromBytes(imgData)
+	blob.SetContentType("image/jpeg")
+
+	// Apply the prefilter
+	resultBlob, err := mockPrefilter.Apply(context.Background(), blob, "")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, resultBlob)
+	assert.Equal(t, "image/png", resultBlob.ContentType())
+
+	// For real implementation we'd compare with expected output,
+	// but we'll skip this for the mock version
 }
 
 func TestIsPrefilter(t *testing.T) {
@@ -396,4 +450,86 @@ func TestHTTPPrefilter(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, resultBlob2)
 	assert.Equal(t, "image/png", resultBlob2.ContentType())
+}
+
+// Test HTTP removebg prefilter implementation
+func TestHTTPRemoveBgPrefilter(t *testing.T) {
+	// Create a test server that responds with a modified image
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Check that we received the correct request
+		assert.Equal(t, "POST", r.Method)
+
+		// Verify content type is application/json when image_url is sent
+		contentType := r.Header.Get("Content-Type")
+		if contentType == "application/json" {
+			// Read the uploaded JSON
+			data, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+			defer r.Body.Close()
+
+			// Parse the JSON request
+			var jsonData map[string]string
+			err = json.Unmarshal(data, &jsonData)
+			assert.NoError(t, err)
+
+			// Verify the image_url parameter
+			imageURL, ok := jsonData["image_url"]
+			assert.True(t, ok)
+			assert.NotEmpty(t, imageURL)
+
+			// Check for optional arguments
+			args, hasArgs := jsonData["args"]
+			if hasArgs {
+				assert.NotEmpty(t, args)
+			}
+		} else {
+			// For direct image upload
+			data, err := io.ReadAll(r.Body)
+			assert.NoError(t, err)
+			defer r.Body.Close()
+
+			// Verify we received image data
+			assert.NotEmpty(t, data)
+		}
+
+		// Return a transparent PNG image
+		transparentData, err := os.ReadFile("testdata/transparent.png")
+		assert.NoError(t, err)
+
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+		_, err = w.Write(transparentData)
+		assert.NoError(t, err)
+	}))
+	defer server.Close()
+
+	// Create the removebg prefilter with the test server URL
+	prefilter := NewRemoveBgPrefilter(server.URL, 5*time.Second)
+	assert.Equal(t, "removebg", prefilter.Name())
+
+	// Test with a source URL
+	blob := NewBlobFromBytes([]byte("test"))
+	blob.SetContentType("image/jpeg")
+
+	// Set a source URL
+	if blob.Header == nil {
+		blob.Header = http.Header{}
+	}
+	blob.Header.Set("image_url", "https://example.com/image.jpg")
+
+	// Apply the prefilter
+	ctx := context.Background()
+	resultBlob, err := prefilter.Apply(ctx, blob, "person")
+	assert.NoError(t, err)
+	assert.NotNil(t, resultBlob)
+	assert.Equal(t, "image/png", resultBlob.ContentType())
+
+	// Test with direct image upload (no source URL)
+	blob = NewBlobFromBytes([]byte("test image data"))
+	blob.SetContentType("image/jpeg")
+
+	resultBlob, err = prefilter.Apply(ctx, blob, "")
+	assert.NoError(t, err)
+	assert.NotNil(t, resultBlob)
+	assert.Equal(t, "image/png", resultBlob.ContentType())
 }

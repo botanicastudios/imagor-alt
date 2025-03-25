@@ -221,22 +221,21 @@ func CreateServer(args []string, funcs ...Option) (srv *server.Server) {
 }
 
 // withPrefiltersOption creates an option to initialize prefilters based on configuration
-func withPrefiltersOption(apiURL string, apiTimeout time.Duration, removebgURL string, removebgTimeout time.Duration, logger *zap.Logger) imagor.Option {
+func withPrefiltersOption(depthmapURL string, depthmapTimeout time.Duration, removebgURL string, removebgTimeout time.Duration, logger *zap.Logger) imagor.Option {
 	return func(app *imagor.Imagor) {
 		// Initialize depthmap prefilter if API URL is configured
-		if apiURL != "" {
-			depthmapPrefilter := imagor.NewDepthmapPrefilter(apiURL, apiTimeout)
+		if depthmapURL != "" {
+			depthmapPrefilter := imagor.NewDepthmapPrefilter(depthmapURL, depthmapTimeout)
 			app.Prefilters = append(app.Prefilters, depthmapPrefilter)
 			logger.Info("initialized depthmap prefilter",
-				zap.String("api_url", apiURL),
-				zap.Duration("timeout", apiTimeout))
+				zap.String("api_url", depthmapURL),
+				zap.Duration("timeout", depthmapTimeout))
 		}
 
 		// Initialize removebg prefilter if API URL is configured
 		if removebgURL != "" {
-			// Note: You would need to implement this function
-			// removebgPrefilter := imagor.NewRemovebgPrefilter(removebgURL, removebgTimeout)
-			// app.Prefilters = append(app.Prefilters, removebgPrefilter)
+			removebgPrefilter := imagor.NewRemoveBgPrefilter(removebgURL, removebgTimeout)
+			app.Prefilters = append(app.Prefilters, removebgPrefilter)
 			logger.Info("initialized removebg prefilter",
 				zap.String("api_url", removebgURL),
 				zap.Duration("timeout", removebgTimeout))

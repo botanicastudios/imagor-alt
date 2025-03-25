@@ -282,6 +282,37 @@ func NewDepthmapPrefilter(apiURL string, timeout time.Duration) *HTTPPrefilter {
 	}
 }
 
+// NewRemoveBgPrefilter creates a new background removal prefilter
+func NewRemoveBgPrefilter(apiURL string, timeout time.Duration) *HTTPPrefilter {
+	if timeout <= 0 {
+		timeout = 60 * time.Second // Use a sensible default
+	}
+
+	// Create client with timeout
+	client := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			IdleConnTimeout:       90 * time.Second,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   10,
+		},
+	}
+
+	return &HTTPPrefilter{
+		name:    "removebg",
+		apiURL:  apiURL,
+		client:  client,
+		timeout: timeout,
+	}
+}
+
 // IsPrefilter checks if a filter name is a prefilter
 func IsPrefilter(filterName string) bool {
 	prefilters := map[string]bool{
