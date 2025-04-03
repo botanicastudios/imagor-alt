@@ -79,6 +79,10 @@ func NewImagor(
 			"API URL for removebg prefilter")
 		imagorPrefilterRemovebgTimeout = fs.Duration("imagor-prefilter-removebg-timeout",
 			60*time.Second, "Timeout for removebg prefilter API calls")
+		imagorPrefilterAIUpscaleAPI = fs.String("imagor-prefilter-ai-upscale-api", "",
+			"API URL for AI upscale prefilter")
+		imagorPrefilterAIUpscaleTimeout = fs.Duration("imagor-prefilter-ai-upscale-timeout",
+			60*time.Second, "Timeout for AI upscale prefilter API calls")
 
 		options, logger, isDebug = applyOptions(fs, cb, append(funcs, baseConfig...)...)
 
@@ -130,7 +134,7 @@ func NewImagor(
 		imagor.WithResultStoragePathStyle(resultHasher),
 		imagor.WithUnsafe(*imagorUnsafe),
 		withPrefiltersOption(*imagorPrefilterDepthmapAPI, *imagorPrefilterDepthmapTimeout,
-			*imagorPrefilterRemovebgAPI, *imagorPrefilterRemovebgTimeout, logger),
+			*imagorPrefilterRemovebgAPI, *imagorPrefilterRemovebgTimeout, *imagorPrefilterAIUpscaleAPI, *imagorPrefilterAIUpscaleTimeout, logger),
 		imagor.WithLogger(logger),
 		imagor.WithDebug(isDebug),
 	)...)
@@ -221,7 +225,7 @@ func CreateServer(args []string, funcs ...Option) (srv *server.Server) {
 }
 
 // withPrefiltersOption creates an option to initialize prefilters based on configuration
-func withPrefiltersOption(depthmapURL string, depthmapTimeout time.Duration, removebgURL string, removebgTimeout time.Duration, logger *zap.Logger) imagor.Option {
+func withPrefiltersOption(depthmapURL string, depthmapTimeout time.Duration, removebgURL string, removebgTimeout time.Duration, aiUpscaleURL string, aiUpscaleTimeout time.Duration, logger *zap.Logger) imagor.Option {
 	return func(app *imagor.Imagor) {
 		// Initialize depthmap prefilter if API URL is configured
 		if depthmapURL != "" {
@@ -239,6 +243,15 @@ func withPrefiltersOption(depthmapURL string, depthmapTimeout time.Duration, rem
 			logger.Info("initialized removebg prefilter",
 				zap.String("api_url", removebgURL),
 				zap.Duration("timeout", removebgTimeout))
+		}
+
+		// Initialize AI upscale prefilter if API URL is configured
+		if aiUpscaleURL != "" {
+			aiUpscalePrefilter := imagor.NewAIUpscalePrefilter(aiUpscaleURL, aiUpscaleTimeout)
+			app.Prefilters = append(app.Prefilters, aiUpscalePrefilter)
+			logger.Info("initialized AI upscale prefilter",
+				zap.String("api_url", aiUpscaleURL),
+				zap.Duration("timeout", aiUpscaleTimeout))
 		}
 	}
 }

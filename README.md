@@ -840,6 +840,8 @@ Usage of imagor:
 | IMAGOR_PREFILTER_DEPTHMAP_TIMEOUT | Timeout for depthmap prefilter API calls | 60s |
 | IMAGOR_PREFILTER_REMOVEBG_API | API URL for the removebg prefilter | |
 | IMAGOR_PREFILTER_REMOVEBG_TIMEOUT | Timeout for removebg prefilter API calls | 60s |
+| IMAGOR_PREFILTER_AI_UPSCALE_API | API URL for the AI upscale prefilter | |
+| IMAGOR_PREFILTER_AI_UPSCALE_TIMEOUT | Timeout for AI upscale prefilter API calls | 60s |
 | FILE_PREFILTER_STORAGE_BASE_DIR | Base directory for File Prefilter Storage | |
 | FILE_PREFILTER_STORAGE_PATH_PREFIX | Base path prefix for File Prefilter Storage | |
 | FILE_PREFILTER_STORAGE_MKDIR_PERMISSION | File Prefilter Storage mkdir permission | 0755 |
